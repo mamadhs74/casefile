@@ -1,0 +1,387 @@
+[
+  {
+    "description": "Wikimedia extmetadata LicenseShortName: CC0",
+    "provider": "wikimedia",
+    "raw_rights": "CC0",
+    "license_url": null,
+    "expected": "cc0"
+  },
+  {
+    "description": "Wikimedia extmetadata LicenseShortName: CC0 1.0",
+    "provider": "wikimedia",
+    "raw_rights": "CC0 1.0",
+    "license_url": null,
+    "expected": "cc0"
+  },
+  {
+    "description": "Wikimedia template: Public domain dedication phrase",
+    "provider": "wikimedia",
+    "raw_rights": "Public Domain Dedication",
+    "license_url": null,
+    "expected": "cc0"
+  },
+  {
+    "description": "Wikimedia extmetadata LicenseShortName: Public domain",
+    "provider": "wikimedia",
+    "raw_rights": "Public domain",
+    "license_url": null,
+    "expected": "public_domain"
+  },
+  {
+    "description": "Wikimedia template: PD-old-70 (copyright expired, author dead 70+ years)",
+    "provider": "wikimedia",
+    "raw_rights": "PD-old-70",
+    "license_url": null,
+    "expected": "public_domain"
+  },
+  {
+    "description": "Wikimedia template: PD-US-expired",
+    "provider": "wikimedia",
+    "raw_rights": "PD-US-expired",
+    "license_url": null,
+    "expected": "public_domain"
+  },
+  {
+    "description": "Wikimedia template: PD-Art -- its premise fails under German law (BGH 2018, Reiss-Engelhorn-Museen) and must surface for manual review, not resolve silently",
+    "provider": "wikimedia",
+    "raw_rights": "PD-Art",
+    "license_url": null,
+    "expected": null
+  },
+  {
+    "description": "Wikimedia template: PD-Art-old-70 -- combining PD-Art with an age claim doesn't rescue it; the risk is in the reproduction, not the underlying work's age",
+    "provider": "wikimedia",
+    "raw_rights": "PD-Art-old-70",
+    "license_url": null,
+    "expected": null
+  },
+  {
+    "description": "Wikimedia template: PD-scan -- covers only the scan process, never the underlying work",
+    "provider": "wikimedia",
+    "raw_rights": "PD-scan",
+    "license_url": null,
+    "expected": null
+  },
+  {
+    "description": "Wikimedia template: PD-Government (US federal government work)",
+    "provider": "wikimedia",
+    "raw_rights": "PD-Government",
+    "license_url": null,
+    "expected": "public_domain"
+  },
+  {
+    "description": "Wikimedia extmetadata LicenseShortName: CC BY 4.0",
+    "provider": "wikimedia",
+    "raw_rights": "CC BY 4.0",
+    "license_url": null,
+    "expected": "cc_by"
+  },
+  {
+    "description": "Wikimedia extmetadata LicenseShortName: CC BY-SA 4.0",
+    "provider": "wikimedia",
+    "raw_rights": "CC BY-SA 4.0",
+    "license_url": null,
+    "expected": "cc_by_sa"
+  },
+  {
+    "description": "Wikimedia raw License field: full legal name instead of short code",
+    "provider": "wikimedia",
+    "raw_rights": "Attribution 4.0 International",
+    "license_url": null,
+    "expected": "cc_by"
+  },
+  {
+    "description": "Wikimedia raw License field: lowercase dash-separated variant as seen in some API responses",
+    "provider": "wikimedia",
+    "raw_rights": "cc-by-sa-4.0",
+    "license_url": null,
+    "expected": "cc_by_sa"
+  },
+  {
+    "description": "Wikimedia template: CC BY-SA 3.0 DE -- German jurisdiction port, common on German Wikimedia material",
+    "provider": "wikimedia",
+    "raw_rights": "CC BY-SA 3.0 DE",
+    "license_url": null,
+    "expected": "cc_by_sa"
+  },
+  {
+    "description": "Wikimedia template: CC BY-SA 2.0 DE",
+    "provider": "wikimedia",
+    "raw_rights": "CC BY-SA 2.0 DE",
+    "license_url": null,
+    "expected": "cc_by_sa"
+  },
+  {
+    "description": "Wikimedia template: CC BY 3.0 AT -- Austrian jurisdiction port",
+    "provider": "wikimedia",
+    "raw_rights": "CC BY 3.0 AT",
+    "license_url": null,
+    "expected": "cc_by"
+  },
+  {
+    "description": "Wikimedia template: CC BY 1.0 -- no jurisdiction port",
+    "provider": "wikimedia",
+    "raw_rights": "CC BY 1.0",
+    "license_url": null,
+    "expected": "cc_by"
+  },
+  {
+    "description": "Wikimedia raw License field: long-form name with spelled-out jurisdiction rather than a two-letter code",
+    "provider": "wikimedia",
+    "raw_rights": "Attribution-ShareAlike 3.0 Germany",
+    "license_url": null,
+    "expected": "cc_by_sa"
+  },
+  {
+    "description": "Wikimedia extmetadata UsageTerms: long form without the 'Creative Commons' prefix",
+    "provider": "wikimedia",
+    "raw_rights": "Attribution-ShareAlike 4.0 International",
+    "license_url": null,
+    "expected": "cc_by_sa"
+  },
+  {
+    "description": "Wikimedia extmetadata UsageTerms: same license, with the 'Creative Commons' prefix -- this is the actual field value Wikimedia puts in UsageTerms and previously failed to parse",
+    "provider": "wikimedia",
+    "raw_rights": "Creative Commons Attribution-ShareAlike 4.0 International",
+    "license_url": null,
+    "expected": "cc_by_sa"
+  },
+  {
+    "description": "Wikimedia template: spaced 'Share Alike' as two tokens rather than the compound 'ShareAlike'",
+    "provider": "wikimedia",
+    "raw_rights": "CC BY Share Alike 4.0",
+    "license_url": null,
+    "expected": "cc_by_sa"
+  },
+  {
+    "description": "Wikimedia template: CC BY-SA 3.0 Czech Republic -- two-word spelled-out jurisdiction name",
+    "provider": "wikimedia",
+    "raw_rights": "CC BY-SA 3.0 Czech Republic",
+    "license_url": null,
+    "expected": "cc_by_sa"
+  },
+  {
+    "description": "Wikimedia template: CC BY 3.0 New Zealand -- two-word spelled-out jurisdiction name",
+    "provider": "wikimedia",
+    "raw_rights": "CC BY 3.0 New Zealand",
+    "license_url": null,
+    "expected": "cc_by"
+  },
+  {
+    "description": "Internet Archive free-text rights: a real CC version number wrapped in a restriction the parser must not discard by ignoring the tail",
+    "provider": "internet_archive",
+    "raw_rights": "CC BY 4.0 not for commercial reuse",
+    "license_url": null,
+    "expected": null
+  },
+  {
+    "description": "Wikimedia template: CC BY-NC-SA 3.0 DE -- NC rejects by construction even with a jurisdiction port attached",
+    "provider": "wikimedia",
+    "raw_rights": "CC BY-NC-SA 3.0 DE",
+    "license_url": null,
+    "expected": null
+  },
+  {
+    "description": "Wikimedia template: CC BY-NC 4.0 as a raw_rights string (not a URL) -- still rejects",
+    "provider": "wikimedia",
+    "raw_rights": "CC BY-NC 4.0",
+    "license_url": null,
+    "expected": null
+  },
+  {
+    "description": "Wikimedia template: CC BY-ND 4.0 as a raw_rights string -- still rejects",
+    "provider": "wikimedia",
+    "raw_rights": "CC BY-ND 4.0",
+    "license_url": null,
+    "expected": null
+  },
+  {
+    "description": "Wikimedia template: bare CC BY with no version -- the grammar requires a version, so this is unparseable rather than a silent grant",
+    "provider": "wikimedia",
+    "raw_rights": "CC BY",
+    "license_url": null,
+    "expected": null
+  },
+  {
+    "description": "rightsstatements.org: In Copyright",
+    "provider": "internet_archive",
+    "raw_rights": null,
+    "license_url": "http://rightsstatements.org/vocab/InC/1.0/",
+    "expected": null
+  },
+  {
+    "description": "rightsstatements.org: In Copyright - Educational Use Permitted",
+    "provider": "europeana",
+    "raw_rights": null,
+    "license_url": "http://rightsstatements.org/vocab/InC-EDU/1.0/",
+    "expected": null
+  },
+  {
+    "description": "rightsstatements.org: In Copyright - Non-Commercial Use Permitted",
+    "provider": "europeana",
+    "raw_rights": null,
+    "license_url": "http://rightsstatements.org/vocab/InC-NC/1.0/",
+    "expected": null
+  },
+  {
+    "description": "rightsstatements.org: No Copyright - United States",
+    "provider": "internet_archive",
+    "raw_rights": null,
+    "license_url": "http://rightsstatements.org/vocab/NoC-US/1.0/",
+    "expected": null
+  },
+  {
+    "description": "rightsstatements.org: No Copyright - Non-Commercial Use Only",
+    "provider": "internet_archive",
+    "raw_rights": null,
+    "license_url": "http://rightsstatements.org/vocab/NoC-NC/1.0/",
+    "expected": null
+  },
+  {
+    "description": "rightsstatements.org: Copyright Undetermined -- also not a grant",
+    "provider": "europeana",
+    "raw_rights": null,
+    "license_url": "http://rightsstatements.org/vocab/UND/1.0/",
+    "expected": null
+  },
+  {
+    "description": "Creative Commons URL: CC0 1.0 (public domain waiver)",
+    "provider": "europeana",
+    "raw_rights": null,
+    "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+    "expected": "cc0"
+  },
+  {
+    "description": "Creative Commons URL: Public Domain Mark 1.0",
+    "provider": "europeana",
+    "raw_rights": null,
+    "license_url": "https://creativecommons.org/publicdomain/mark/1.0/",
+    "expected": "public_domain"
+  },
+  {
+    "description": "Creative Commons URL: Attribution 4.0",
+    "provider": "wikimedia",
+    "raw_rights": null,
+    "license_url": "https://creativecommons.org/licenses/by/4.0/",
+    "expected": "cc_by"
+  },
+  {
+    "description": "Creative Commons URL: Attribution-ShareAlike 4.0",
+    "provider": "wikimedia",
+    "raw_rights": null,
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/",
+    "expected": "cc_by_sa"
+  },
+  {
+    "description": "Creative Commons URL: Attribution-NonCommercial 4.0 -- NC is not in our vocabulary and must not be silently treated as usable on a monetized channel",
+    "provider": "europeana",
+    "raw_rights": null,
+    "license_url": "https://creativecommons.org/licenses/by-nc/4.0/",
+    "expected": null
+  },
+  {
+    "description": "Creative Commons URL: Attribution-NoDerivs 4.0 -- also unsupported",
+    "provider": "europeana",
+    "raw_rights": null,
+    "license_url": "https://creativecommons.org/licenses/by-nd/4.0/",
+    "expected": null
+  },
+  {
+    "description": "Internet Archive free-text rights: explicit public domain statement still resolves regardless of source",
+    "provider": "internet_archive",
+    "raw_rights": "Public Domain",
+    "license_url": null,
+    "expected": "public_domain"
+  },
+  {
+    "description": "Internet Archive free-text rights: vague pointer to a details page, no actual determination",
+    "provider": "internet_archive",
+    "raw_rights": "See the copyright and permissions page (http://archive.org/about/faqs.php) for further information",
+    "license_url": null,
+    "expected": null
+  },
+  {
+    "description": "Internet Archive free-text rights: contact-for-permission notice",
+    "provider": "internet_archive",
+    "raw_rights": "Contact repository for reproduction permissions.",
+    "license_url": null,
+    "expected": null
+  },
+  {
+    "description": "Internet Archive free-text rights: unevaluated",
+    "provider": "internet_archive",
+    "raw_rights": "Rights status not evaluated",
+    "license_url": null,
+    "expected": null
+  },
+  {
+    "description": "Internet Archive free-text rights: unknown",
+    "provider": "internet_archive",
+    "raw_rights": "Unknown",
+    "license_url": null,
+    "expected": null
+  },
+  {
+    "description": "Internet Archive: rights field absent entirely",
+    "provider": "internet_archive",
+    "raw_rights": null,
+    "license_url": null,
+    "expected": null
+  },
+  {
+    "description": "Empty string rights (field present but blank, as commonly returned by IA metadata)",
+    "provider": "internet_archive",
+    "raw_rights": "",
+    "license_url": null,
+    "expected": null
+  },
+  {
+    "description": "Whitespace-only rights string",
+    "provider": "internet_archive",
+    "raw_rights": "   ",
+    "license_url": null,
+    "expected": null
+  },
+  {
+    "description": "Conflict: rightsstatements.org URL rejects even though raw_rights alone would otherwise resolve -- URL is checked first and wins",
+    "provider": "europeana",
+    "raw_rights": "Public domain",
+    "license_url": "http://rightsstatements.org/vocab/InC/1.0/",
+    "expected": null
+  },
+  {
+    "description": "Provider default: Pexels catalog is uniformly free-to-use with no attribution required, under its own platform license rather than CC0",
+    "provider": "pexels",
+    "raw_rights": null,
+    "license_url": null,
+    "expected": "platform_free"
+  },
+  {
+    "description": "Provider default: Pixabay catalog is uniformly free-to-use with no attribution required, under its own platform license rather than CC0",
+    "provider": "pixabay",
+    "raw_rights": null,
+    "license_url": null,
+    "expected": "platform_free"
+  },
+  {
+    "description": "No provider default exists for Flickr -- only Pexels and Pixabay get a blanket default",
+    "provider": "flickr",
+    "raw_rights": null,
+    "license_url": null,
+    "expected": null
+  },
+  {
+    "description": "Trailing sentence punctuation must not block a match: 'Public domain.'",
+    "provider": "internet_archive",
+    "raw_rights": "Public domain.",
+    "license_url": null,
+    "expected": "public_domain"
+  },
+  {
+    "description": "PD-USGov-edict (edicts of government: laws, court opinions) -- previously dead because the template entry didn't match what this string actually normalizes to",
+    "provider": "wikimedia",
+    "raw_rights": "PD-USGov-edict",
+    "license_url": null,
+    "expected": "public_domain"
+  }
+]

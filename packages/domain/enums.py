@@ -137,6 +137,8 @@ class LicenseType(StrEnum):
     PUBLIC_DOMAIN = "public_domain"
     YOUTUBE_AUDIO_LIBRARY = "youtube_audio_library"
     CC_BY = "cc_by"
+    CC_BY_SA = "cc_by_sa"
+    PLATFORM_FREE = "platform_free"  # bespoke free-to-use catalog license, e.g. Pexels/Pixabay
     LICENSED = "licensed"
     GENERATED = "generated"
 
