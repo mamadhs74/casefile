@@ -13,8 +13,9 @@ from enum import StrEnum
 
 from sqlmodel import Session, select
 
-from packages.db.models import Source, SourceTier
+from packages.db.models import Source
 from packages.db.session import get_session
+from packages.domain.enums import SourceTier
 
 MIN_VERIFIED_SOURCES = 3
 MIN_DISTINCT_DOMAINS = 3
