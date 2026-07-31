@@ -4,7 +4,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from packages.db.models import Episode, IllegalStageTransitionError, PipelineStage
+from packages.db.models import Episode, IllegalStageTransitionError
+from packages.domain.enums import PipelineStage
 
 
 def make_episode(**overrides: object) -> Episode:

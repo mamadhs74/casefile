@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from sqlmodel import Session
 
-from packages.db.models import Case, MonetizationTier, RiskFlag
+from packages.db.models import Case
+from packages.domain.enums import MonetizationTier, RiskFlag
 from tests.factories import make_case
 
 

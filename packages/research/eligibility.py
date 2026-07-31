@@ -1,7 +1,9 @@
 """Eligibility scoring per docs/SCHEMA.md.
 
-Pure function, no DB access, fully unit-testable. Recomputed on every write to
-`Case` by the caller (the API layer owns persistence).
+Pure function, no DB access, fully unit-testable. Takes an EligibilityInput
+(packages/domain/protocols.py) rather than the ORM Case, so this module
+imports nothing from packages/db. Recomputed on every write to Case by
+packages/db/listeners.py, not by caller discipline.
 """
 
 from __future__ import annotations
@@ -9,7 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from packages.db.models import Case, LegalRisk, MonetizationTier, ResolutionStatus, RiskFlag
+from packages.domain.enums import LegalRisk, MonetizationTier, ResolutionStatus, RiskFlag
+from packages.domain.protocols import EligibilityInput
 
 GREEN_MIN_DOCUMENTATION_SCORE = 3
 GREEN_MIN_YEARS_SINCE_EVENT = 25
@@ -42,14 +45,14 @@ class CaseNotEligibleError(Exception):
         )
 
 
-def score_case(case: Case) -> EligibilityResult:
+def score_case(case: EligibilityInput) -> EligibilityResult:
     flags = set(case.risk_flags)
     tier, tier_notes = _score_tier(case, flags)
     legal_risk, risk_notes = _score_legal_risk(case, flags)
     return EligibilityResult(tier=tier, legal_risk=legal_risk, notes=[*tier_notes, *risk_notes])
 
 
-def _score_tier(case: Case, flags: set[RiskFlag]) -> tuple[MonetizationTier, list[str]]:
+def _score_tier(case: EligibilityInput, flags: set[RiskFlag]) -> tuple[MonetizationTier, list[str]]:
     if RiskFlag.CHILD_VICTIM in flags:
         return (
             MonetizationTier.RED,
@@ -108,7 +111,7 @@ def _score_tier(case: Case, flags: set[RiskFlag]) -> tuple[MonetizationTier, lis
     return MonetizationTier.YELLOW, notes
 
 
-def _score_legal_risk(case: Case, flags: set[RiskFlag]) -> tuple[LegalRisk, list[str]]:
+def _score_legal_risk(case: EligibilityInput, flags: set[RiskFlag]) -> tuple[LegalRisk, list[str]]:
     if RiskFlag.ONGOING_LITIGATION in flags:
         return (
             LegalRisk.HIGH,

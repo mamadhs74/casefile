@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from packages.db.models import Case, CaseType, ResolutionStatus, Source, SourceTier
+from packages.db.models import Case, Source
+from packages.domain.enums import CaseType, ResolutionStatus, SourceTier
 
 
 def make_case(**overrides: Any) -> Case:
@@ -25,10 +26,10 @@ def make_case(**overrides: Any) -> Case:
 
 
 def make_source(case_id: int, **overrides: Any) -> Source:
+    # domain is derived from url by packages/db/listeners.py; not settable here.
     defaults: dict[str, Any] = dict(
         case_id=case_id,
         url="https://example.com/article",
-        domain="example.com",
         publisher="Example Publisher",
         title="An article",
         published_date=None,

@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from packages.db.models import LegalRisk, MonetizationTier, ResolutionStatus, RiskFlag
+from packages.domain.enums import LegalRisk, MonetizationTier, ResolutionStatus, RiskFlag
 from packages.research.eligibility import (
     CaseNotEligibleError,
     ensure_eligible_for_episode,
