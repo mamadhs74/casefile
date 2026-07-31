@@ -151,6 +151,10 @@ That correlation is the real product.
 - Tests for anything with branching logic. Rendering gets smoke tests, not pixel tests.
 - Frontend: dark base, saturated accents, generous motion. Responsive down to tablet.
   Desktop-first — this is a production tool, not a phone app.
+- Never delete or weaken a failing test to get a green suite. Fix the code, or leave it
+  failing and say so. Removing the case is the one thing that must not happen.
+- Never widen a type, add a permissive fallback, or relax an assertion to make an error
+  go away. If the constraint is wrong, say why and ask.
 
 ## Commit style
 
