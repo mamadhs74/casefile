@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router';
 import { AppShell } from './components/layout/AppShell';
 import { CasesLibraryPage } from './pages/CasesLibraryPage';
+import { NewCasePage } from './pages/NewCasePage';
 import { CaseDetailPage } from './pages/CaseDetailPage';
 import { StudioPage } from './pages/StudioPage';
 import { PublishingPage } from './pages/PublishingPage';
@@ -12,6 +13,7 @@ export function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/cases" replace />} />
         <Route path="/cases" element={<CasesLibraryPage />} />
+        <Route path="/cases/new" element={<NewCasePage />} />
         <Route path="/cases/:caseId" element={<CaseDetailPage />} />
         <Route path="/studio" element={<StudioPage />} />
         <Route path="/publishing" element={<PublishingPage />} />

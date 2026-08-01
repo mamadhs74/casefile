@@ -1,4 +1,4 @@
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { useCases } from '../api/queries';
 import type { CaseRead, CaseStatus, CaseType, MonetizationTier } from '../api/cases';
 import { caseStatusLabels, caseTypeLabels, monetizationTierLabels } from '../lib/domain';
@@ -102,8 +102,14 @@ export function CasesLibraryPage() {
 
   return (
     <div className="flex max-w-6xl flex-col gap-6">
-      <div>
+      <div className="flex items-center justify-between">
         <h1 className="font-sans text-2xl font-semibold text-ink">Cases</h1>
+        <Link
+          to="/cases/new"
+          className="rounded-md bg-ledger-blue px-3 py-1.5 font-sans text-sm font-semibold text-paper"
+        >
+          Add case
+        </Link>
       </div>
 
       <div className="flex flex-wrap items-end gap-4 rounded-lg border border-ink/10 bg-paper-raised p-4">
@@ -144,9 +150,17 @@ export function CasesLibraryPage() {
         <EmptyState
           title={hasFilters ? 'No cases match these filters' : 'No cases yet'}
           description={
-            hasFilters
-              ? 'Clear a filter to widen the search.'
-              : 'The library is empty — case intake happens outside this screen for now.'
+            hasFilters ? 'Clear a filter to widen the search.' : 'Add the first one to get started.'
+          }
+          action={
+            !hasFilters && (
+              <Link
+                to="/cases/new"
+                className="rounded-md bg-ledger-blue px-3 py-1.5 font-sans text-sm font-semibold text-paper"
+              >
+                Add case
+              </Link>
+            )
           }
         />
       )}

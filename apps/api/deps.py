@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException
 from sqlmodel import Session
 
-from packages.db.models import Case
+from packages.db.models import Subject
 from packages.db.session import get_engine
 
 
@@ -20,8 +20,8 @@ def get_session() -> Iterator[Session]:
 SessionDep = Annotated[Session, Depends(get_session)]
 
 
-def get_case_or_404(session: Session, case_id: int) -> Case:
-    case = session.get(Case, case_id)
-    if case is None:
-        raise HTTPException(status_code=404, detail="case not found")
-    return case
+def get_subject_or_404(session: Session, subject_id: int) -> Subject:
+    subject = session.get(Subject, subject_id)
+    if subject is None:
+        raise HTTPException(status_code=404, detail="subject not found")
+    return subject

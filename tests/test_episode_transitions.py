@@ -9,7 +9,7 @@ from packages.domain.enums import PipelineStage
 
 
 def make_episode(**overrides: object) -> Episode:
-    defaults: dict[str, object] = dict(case_id=1, variation_profile_id=1)
+    defaults: dict[str, object] = dict(subject_id=1, variation_profile_id=1)
     defaults.update(overrides)
     return Episode(**defaults)
 

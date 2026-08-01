@@ -1,97 +1,107 @@
 """API request/response models.
 
 These are deliberately separate from the SQLModel tables in packages/db/models.py.
-CaseCreate and CaseUpdate do not have monetization_tier, legal_risk, or
+SubjectCreate and SubjectUpdate do not have monetization_tier, legal_risk, or
 eligibility_notes as fields at all -- the API is structurally incapable of
 accepting a client-supplied override for values the before_insert/before_update
 listeners (packages/db/listeners.py) compute unconditionally. `extra="forbid"`
 turns an attempt to sneak one in via the request body into a 422, not a
 silent no-op.
+
+SubjectCreate takes strategy_slug, not strategy_id: a strategy's slug is
+known at code-registration time and needs no DB round trip, which is what
+lets /subjects/preview-eligibility stay a pure, no-DB-access endpoint (see
+packages/research/dispatch.py). The router resolves slug to the real
+strategy_id FK only on the path that persists a Subject; strategy_id is not
+on SubjectUpdate at all -- a subject's strategy is immutable after creation,
+since risk_flags and attributes are shaped by it.
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
 from packages.domain.enums import (
-    CaseStatus,
-    CaseType,
+    ArchiveProvider,
     LegalRisk,
     MonetizationTier,
     ResolutionStatus,
-    RiskFlag,
     SourceTier,
+    SubjectStatus,
 )
 from packages.research.gate import SourceGateFailureReason
 
 
-class CaseCreate(BaseModel):
+class SubjectCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    strategy_slug: str
     slug: str
     title: str
-    case_type: CaseType
     event_year: int
     country: str
     region: str | None = None
     summary: str
     resolution_status: ResolutionStatus
     living_persons_involved: bool = False
-    risk_flags: list[RiskFlag] = []
+    risk_flags: list[str] = []
+    attributes: dict[str, Any] = {}
     documentation_score: int | None = None
     estimated_runtime_min: int | None = None
-    status: CaseStatus = CaseStatus.CANDIDATE
+    status: SubjectStatus = SubjectStatus.CANDIDATE
     rejected_reason: str | None = None
 
 
-class CaseUpdate(BaseModel):
+class SubjectUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     slug: str | None = None
     title: str | None = None
-    case_type: CaseType | None = None
     event_year: int | None = None
     country: str | None = None
     region: str | None = None
     summary: str | None = None
     resolution_status: ResolutionStatus | None = None
     living_persons_involved: bool | None = None
-    risk_flags: list[RiskFlag] | None = None
+    risk_flags: list[str] | None = None
+    attributes: dict[str, Any] | None = None
     documentation_score: int | None = None
     estimated_runtime_min: int | None = None
-    status: CaseStatus | None = None
+    status: SubjectStatus | None = None
     rejected_reason: str | None = None
 
 
-class CaseRead(BaseModel):
+class SubjectRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     created_at: datetime
     updated_at: datetime
+    strategy_id: int
     slug: str
     title: str
-    case_type: CaseType
     event_year: int
     country: str
     region: str | None
     summary: str
     resolution_status: ResolutionStatus
     living_persons_involved: bool
-    risk_flags: list[RiskFlag]
+    risk_flags: list[str]
+    attributes: dict[str, Any]
     documentation_score: int | None
     estimated_runtime_min: int | None
     monetization_tier: MonetizationTier
     legal_risk: LegalRisk
     eligibility_notes: list[str]
-    status: CaseStatus
+    status: SubjectStatus
     rejected_reason: str | None
 
 
-class CaseListResponse(BaseModel):
-    items: list[CaseRead]
+class SubjectListResponse(BaseModel):
+    items: list[SubjectRead]
     total: int
     offset: int
     limit: int
@@ -131,7 +141,7 @@ class SourceRead(BaseModel):
     id: int
     created_at: datetime
     updated_at: datetime
-    case_id: int
+    subject_id: int
     url: str
     domain: str
     publisher: str
@@ -142,3 +152,22 @@ class SourceRead(BaseModel):
     text_path: str
     text_sha256: str
     word_count: int
+
+
+class StrategyRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    slug: str
+    name: str
+    description: str
+    subject_noun_singular: str
+    subject_noun_plural: str
+    min_verified_sources: int
+    min_primary_records: int
+    min_distinct_domains: int
+    style_guide: dict[str, Any]
+    allowed_archive_providers: list[ArchiveProvider]
+    is_active: bool

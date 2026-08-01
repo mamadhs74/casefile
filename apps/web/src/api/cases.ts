@@ -2,7 +2,9 @@ import { apiFetch } from './client';
 import type { components } from './schema';
 
 export type CaseRead = components['schemas']['CaseRead'];
+export type CaseCreate = components['schemas']['CaseCreate'];
 export type CaseListResponse = components['schemas']['CaseListResponse'];
+export type EligibilityResultRead = components['schemas']['EligibilityResultRead'];
 export type GateResultRead = components['schemas']['GateResultRead'];
 export type SourceRead = components['schemas']['SourceRead'];
 export type CaseStatus = components['schemas']['CaseStatus'];
@@ -45,4 +47,18 @@ export function getCaseGate(caseId: number): Promise<GateResultRead> {
 
 export function listCaseSources(caseId: number): Promise<SourceRead[]> {
   return apiFetch<SourceRead[]>(`/cases/${caseId}/sources`);
+}
+
+export function previewEligibility(payload: CaseCreate): Promise<EligibilityResultRead> {
+  return apiFetch<EligibilityResultRead>('/cases/preview-eligibility', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function createCase(payload: CaseCreate): Promise<CaseRead> {
+  return apiFetch<CaseRead>('/cases', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }

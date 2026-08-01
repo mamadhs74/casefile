@@ -1,9 +1,11 @@
-"""Seed data/casefile.db with cases spanning every monetization tier and
-legal-risk level, for exercising the case library UI against real data.
+"""Seed data/casefile.db with the criminal-cases strategy and subjects
+spanning every monetization tier and legal-risk level, for exercising the
+case library UI against real data.
 
-monetization_tier, legal_risk, eligibility_notes, and Source.domain are all
-computed by packages/db/listeners.py on insert -- this script never sets
-them directly, same as the API never accepts them from a client.
+monetization_tier, legal_risk, eligibility_notes, Subject.attributes, and
+Source.domain are all computed/validated by packages/db/listeners.py on
+insert -- this script never sets the computed ones directly, same as the
+API never accepts them from a client.
 
 Run with: uv run python scripts/seed_dev.py
 """
@@ -14,22 +16,56 @@ from datetime import UTC, date, datetime
 
 from sqlmodel import select
 
-from packages.db.models import Case, Source
+from packages.db.models import Source, Strategy, Subject
 from packages.db.session import create_all, get_session
-from packages.domain.enums import CaseStatus, CaseType, ResolutionStatus, RiskFlag, SourceTier
+from packages.domain.enums import ArchiveProvider, ResolutionStatus, SourceTier, SubjectStatus
+from packages.strategies.criminal_cases import SLUG as CRIMINAL_CASES_SLUG
+from packages.strategies.criminal_cases.enums import CaseType, RiskFlag
 
 
 def seed() -> None:
     create_all()
     with get_session() as session:
-        if session.exec(select(Case)).first() is not None:
-            print("data/casefile.db already has cases -- not reseeding.")
+        if session.exec(select(Subject)).first() is not None:
+            print("data/casefile.db already has subjects -- not reseeding.")
             return
 
-        meridian = Case(
+        strategy = session.exec(
+            select(Strategy).where(Strategy.slug == CRIMINAL_CASES_SLUG)
+        ).first()
+        if strategy is None:
+            strategy = Strategy(
+                slug=CRIMINAL_CASES_SLUG,
+                name="Criminal Cases",
+                description="Well-documented criminal cases with primary-record sourcing.",
+                subject_noun_singular="case",
+                subject_noun_plural="cases",
+                min_verified_sources=3,
+                min_primary_records=1,
+                min_distinct_domains=3,
+                style_guide={
+                    "tone": "factual, investigative",
+                    "forbidden": [
+                        "gore description beyond what a news report would carry",
+                        "speculation presented as fact",
+                        "victim-blaming framing",
+                        "recreations of the moment of death",
+                        "you won't believe what happened next",
+                    ],
+                },
+                allowed_archive_providers=list(ArchiveProvider),
+            )
+            session.add(strategy)
+            session.commit()
+            session.refresh(strategy)
+        assert strategy.id is not None
+        strategy_id = strategy.id
+
+        meridian = Subject(
+            strategy_id=strategy_id,
             slug="green-1948-vanished-liner",
             title="The Vanishing of the SS Meridian",
-            case_type=CaseType.MARITIME,
+            attributes={"case_type": CaseType.MARITIME},
             event_year=1948,
             country="United Kingdom",
             region="Southampton",
@@ -43,12 +79,13 @@ def seed() -> None:
             risk_flags=[],
             documentation_score=8,
             estimated_runtime_min=22,
-            status=CaseStatus.READY,
+            status=SubjectStatus.READY,
         )
-        fairmount = Case(
+        fairmount = Subject(
+            strategy_id=strategy_id,
             slug="green-1962-institution-inquest",
             title="The Fairmount Home Inquest",
-            case_type=CaseType.INSTITUTIONAL_ABUSE,
+            attributes={"case_type": CaseType.INSTITUTIONAL_ABUSE},
             event_year=1962,
             country="Canada",
             region="Ontario",
@@ -58,12 +95,13 @@ def seed() -> None:
             risk_flags=[],
             documentation_score=6,
             estimated_runtime_min=28,
-            status=CaseStatus.CANDIDATE,
+            status=SubjectStatus.CANDIDATE,
         )
-        route_9 = Case(
+        route_9 = Subject(
+            strategy_id=strategy_id,
             slug="yellow-2019-disappearance",
             title="Last Seen on Route 9",
-            case_type=CaseType.DISAPPEARANCE,
+            attributes={"case_type": CaseType.DISAPPEARANCE},
             event_year=2019,
             country="United States",
             region="Vermont",
@@ -73,12 +111,13 @@ def seed() -> None:
             risk_flags=[RiskFlag.RECENT_EVENT],
             documentation_score=5,
             estimated_runtime_min=None,
-            status=CaseStatus.RESEARCHING,
+            status=SubjectStatus.RESEARCHING,
         )
-        cedar_street = Case(
+        cedar_street = Subject(
+            strategy_id=strategy_id,
             slug="yellow-1991-hate-motivated",
             title="The Cedar Street Fire",
-            case_type=CaseType.DISASTER,
+            attributes={"case_type": CaseType.DISASTER},
             event_year=1991,
             country="United States",
             region="Ohio",
@@ -88,12 +127,13 @@ def seed() -> None:
             risk_flags=[RiskFlag.POLITICAL_VIOLENCE],
             documentation_score=4,
             estimated_runtime_min=24,
-            status=CaseStatus.CANDIDATE,
+            status=SubjectStatus.CANDIDATE,
         )
-        blocked_example = Case(
+        blocked_example = Subject(
+            strategy_id=strategy_id,
             slug="red-child-victim-case",
             title="[Placeholder] Blocked case example",
-            case_type=CaseType.HOMICIDE,
+            attributes={"case_type": CaseType.HOMICIDE},
             event_year=1985,
             country="United States",
             region="Illinois",
@@ -106,12 +146,13 @@ def seed() -> None:
             risk_flags=[RiskFlag.CHILD_VICTIM],
             documentation_score=7,
             estimated_runtime_min=20,
-            status=CaseStatus.REJECTED,
+            status=SubjectStatus.REJECTED,
         )
-        harrow_quarry = Case(
+        harrow_quarry = Subject(
+            strategy_id=strategy_id,
             slug="red-named-living-suspect",
             title="The Harrow Quarry Case",
-            case_type=CaseType.UNEXPLAINED_EVENT,
+            attributes={"case_type": CaseType.UNEXPLAINED_EVENT},
             event_year=2015,
             country="United States",
             region="Colorado",
@@ -121,12 +162,13 @@ def seed() -> None:
             risk_flags=[RiskFlag.NAMED_LIVING_SUSPECT, RiskFlag.ONGOING_LITIGATION],
             documentation_score=5,
             estimated_runtime_min=None,
-            status=CaseStatus.CANDIDATE,
+            status=SubjectStatus.CANDIDATE,
         )
-        blackwater = Case(
+        blackwater = Subject(
+            strategy_id=strategy_id,
             slug="unknown-not-scored",
             title="The Blackwater Ledger",
-            case_type=CaseType.HISTORICAL_HORROR,
+            attributes={"case_type": CaseType.HISTORICAL_HORROR},
             event_year=1904,
             country="United States",
             region="Louisiana",
@@ -136,10 +178,10 @@ def seed() -> None:
             risk_flags=[],
             documentation_score=None,
             estimated_runtime_min=None,
-            status=CaseStatus.CANDIDATE,
+            status=SubjectStatus.CANDIDATE,
         )
 
-        cases = [
+        subjects = [
             meridian,
             fairmount,
             route_9,
@@ -148,60 +190,60 @@ def seed() -> None:
             harrow_quarry,
             blackwater,
         ]
-        session.add_all(cases)
+        session.add_all(subjects)
         session.commit()
-        for case in cases:
-            session.refresh(case)
+        for subject in subjects:
+            session.refresh(subject)
 
         # meridian gets a full, passing source gate (3 verified, 1 primary, 3 domains).
         sources = [
             Source(
-                case_id=meridian.id,
+                subject_id=meridian.id,
                 url="https://www.nationalarchives.gov.uk/inquiry/meridian-1948",
                 publisher="The National Archives (UK)",
                 title="Board of Trade Inquiry into the Loss of SS Meridian",
                 published_date=date(1949, 3, 2),
                 retrieved_at=datetime.now(UTC),
                 tier=SourceTier.PRIMARY_RECORD,
-                text_path="cases/green-1948-vanished-liner/sources/1.txt",
+                text_path="subjects/green-1948-vanished-liner/sources/1.txt",
                 text_sha256="a" * 64,
                 word_count=4200,
             ),
             Source(
-                case_id=meridian.id,
+                subject_id=meridian.id,
                 url="https://www.lloydslist.com/archive/meridian-inquiry",
                 publisher="Lloyd's List",
                 title="Inquiry Opens Into Meridian Disappearance",
                 published_date=date(1948, 11, 14),
                 retrieved_at=datetime.now(UTC),
                 tier=SourceTier.CONTEMPORANEOUS,
-                text_path="cases/green-1948-vanished-liner/sources/2.txt",
+                text_path="subjects/green-1948-vanished-liner/sources/2.txt",
                 text_sha256="b" * 64,
                 word_count=850,
             ),
             Source(
-                case_id=meridian.id,
+                subject_id=meridian.id,
                 url="https://www.bbc.co.uk/history/meridian-mystery",
                 publisher="BBC History",
                 title="Britain's Cold War Ghost Ship",
                 published_date=date(2011, 5, 6),
                 retrieved_at=datetime.now(UTC),
                 tier=SourceTier.RETROSPECTIVE,
-                text_path="cases/green-1948-vanished-liner/sources/3.txt",
+                text_path="subjects/green-1948-vanished-liner/sources/3.txt",
                 text_sha256="c" * 64,
                 word_count=1600,
             ),
             # fairmount gets one source -- a source gate that still fails, to
             # exercise the gate's "not yet clear" state on the detail page.
             Source(
-                case_id=fairmount.id,
+                subject_id=fairmount.id,
                 url="https://www.cbc.ca/news/fairmount-inquest",
                 publisher="CBC News",
                 title="Provincial Inquest Opens Into Fairmount Home",
                 published_date=date(1963, 1, 20),
                 retrieved_at=datetime.now(UTC),
                 tier=SourceTier.CONTEMPORANEOUS,
-                text_path="cases/green-1962-institution-inquest/sources/1.txt",
+                text_path="subjects/green-1962-institution-inquest/sources/1.txt",
                 text_sha256="d" * 64,
                 word_count=620,
             ),
@@ -209,8 +251,11 @@ def seed() -> None:
         session.add_all(sources)
         session.commit()
 
-        for case in cases:
-            print(f"{case.id:>3}  {case.title:<45} {case.monetization_tier:<8} {case.legal_risk}")
+        for subject in subjects:
+            print(
+                f"{subject.id:>3}  {subject.title:<45} "
+                f"{subject.monetization_tier:<8} {subject.legal_risk}"
+            )
 
 
 if __name__ == "__main__":

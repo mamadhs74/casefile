@@ -14,9 +14,8 @@ from sqlalchemy import Column, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from packages.domain.enums import (
+    ArchiveProvider,
     AssetKind,
-    CaseStatus,
-    CaseType,
     ColdOpenStyle,
     FactType,
     JobStatus,
@@ -28,8 +27,8 @@ from packages.domain.enums import (
     Platform,
     PublicationStatus,
     ResolutionStatus,
-    RiskFlag,
     SourceTier,
+    SubjectStatus,
     ThumbnailComposition,
 )
 
@@ -81,32 +80,72 @@ _STAGE_INDEX: dict[PipelineStage, int] = {stage: i for i, stage in enumerate(_ST
 # --------------------------------------------------------------------------
 
 
-class Case(TimestampedModel, table=True):
-    __tablename__ = "case"
+class Strategy(TimestampedModel, table=True):
+    """One content vertical: its own eligibility rules, sourcing policy, and
+    (eventually) channels. slug doubles as the lookup key into
+    packages/strategies/<slug>/ -- see packages/research/dispatch.py.
+
+    min_verified_sources / min_primary_records / min_distinct_domains are
+    R1's gate thresholds, tunable per strategy (unlike the eligibility logic
+    itself, these are just numbers -- see docs/SCHEMA.md for why the two are
+    treated differently). There is deliberately no general-purpose update
+    endpoint for these fields: they come from a migration/seed, not a live
+    admin surface, so weakening R1 requires a code change someone reviews.
+    """
+
+    __tablename__ = "strategy"
 
     slug: str = Field(unique=True, index=True)
+    name: str
+    description: str
+    subject_noun_singular: str
+    subject_noun_plural: str
+    min_verified_sources: int
+    min_primary_records: int
+    min_distinct_domains: int
+    style_guide: dict[str, Any] = Field(default_factory=dict, sa_column=Column(SAJSON))
+    allowed_archive_providers: list[ArchiveProvider] = Field(
+        default_factory=list, sa_column=Column(SAJSON)
+    )
+    is_active: bool = Field(default=True)
+
+
+class Subject(TimestampedModel, table=True):
+    """The library you browse and select from. One subject can produce multiple
+    episodes over time. Generalized from what used to be Case -- see docs/SCHEMA.md.
+
+    risk_flags and attributes are both strategy-owned vocabulary stored as
+    plain JSON/text; packages/db/listeners.py validates both against the
+    subject's own strategy on every write, the same way monetization_tier
+    has always been computed rather than trusted from the caller.
+    """
+
+    __tablename__ = "subject"
+
+    strategy_id: int = Field(foreign_key="strategy.id", index=True)
+    slug: str = Field(unique=True, index=True)
     title: str
-    case_type: CaseType
     event_year: int
     country: str
     region: str | None = None
     summary: str
     resolution_status: ResolutionStatus
     living_persons_involved: bool
-    risk_flags: list[RiskFlag] = Field(default_factory=list, sa_column=Column(SAJSON))
+    risk_flags: list[str] = Field(default_factory=list, sa_column=Column(SAJSON))
+    attributes: dict[str, Any] = Field(default_factory=dict, sa_column=Column(SAJSON))
     documentation_score: int | None = None
     estimated_runtime_min: int | None = None
     monetization_tier: MonetizationTier = Field(default=MonetizationTier.UNKNOWN, index=True)
     legal_risk: LegalRisk = Field(default=LegalRisk.LOW)
     eligibility_notes: list[str] = Field(default_factory=list, sa_column=Column(SAJSON))
-    status: CaseStatus = Field(default=CaseStatus.CANDIDATE, index=True)
+    status: SubjectStatus = Field(default=SubjectStatus.CANDIDATE, index=True)
     rejected_reason: str | None = None
 
 
 class Source(TimestampedModel, table=True):
     __tablename__ = "source"
 
-    case_id: int = Field(foreign_key="case.id", index=True)
+    subject_id: int = Field(foreign_key="subject.id", index=True)
     url: str
     domain: str = Field(default="")  # derived from url, see packages/db/listeners.py
     publisher: str
@@ -122,7 +161,7 @@ class Source(TimestampedModel, table=True):
 class Fact(TimestampedModel, table=True):
     __tablename__ = "fact"
 
-    case_id: int = Field(foreign_key="case.id", index=True)
+    subject_id: int = Field(foreign_key="subject.id", index=True)
     statement: str
     fact_type: FactType
     occurred_at: str | None = None
@@ -140,8 +179,18 @@ class FactSource(TimestampedModel, table=True):
 
 
 class VariationProfile(TimestampedModel, table=True):
+    """Enforces R2. strategy_id scopes the similarity-check comparison pool
+
+    -- "last 10 published" means last 10 for this strategy, not across every
+    strategy's channels. Nothing reads this field yet (packages/script isn't
+    built); it's added now so the column exists before the similarity-check
+    implementation has to choose between a migration and silently comparing
+    across strategies.
+    """
+
     __tablename__ = "variation_profile"
 
+    strategy_id: int = Field(foreign_key="strategy.id", index=True)
     cold_open_style: ColdOpenStyle
     act_count: int
     narration_wpm: int
@@ -157,7 +206,7 @@ class VariationProfile(TimestampedModel, table=True):
 class Episode(TimestampedModel, table=True):
     __tablename__ = "episode"
 
-    case_id: int = Field(foreign_key="case.id", index=True)
+    subject_id: int = Field(foreign_key="subject.id", index=True)
     variation_profile_id: int = Field(foreign_key="variation_profile.id")
     stage: PipelineStage = Field(default=PipelineStage.CREATED, index=True)
     gate_a_approved_at: datetime | None = None

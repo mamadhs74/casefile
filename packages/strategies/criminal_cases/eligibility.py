@@ -1,0 +1,132 @@
+"""criminal-cases' eligibility scoring per docs/SCHEMA.md.
+
+Pure function, no DB access, fully unit-testable. Ported from the former
+packages/research/eligibility.py::score_case unchanged in substance --
+migrating to a strategy package is not a policy change. Reached only
+through packages/research/dispatch.py::score_subject, which has already
+parsed subject.risk_flags into RiskFlag by the time this runs.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from packages.domain.enums import LegalRisk, MonetizationTier, ResolutionStatus
+from packages.research.dispatch import TypedEligibilityInput
+from packages.research.eligibility import EligibilityResult
+from packages.strategies.criminal_cases.enums import RiskFlag
+
+GREEN_MIN_DOCUMENTATION_SCORE = 3
+GREEN_MIN_YEARS_SINCE_EVENT = 25
+
+_YELLOW_FLAGS = frozenset(
+    {
+        RiskFlag.SEXUAL_VIOLENCE,
+        RiskFlag.SUICIDE_CENTRAL,
+        RiskFlag.POLITICAL_VIOLENCE,
+        RiskFlag.RECENT_EVENT,
+    }
+)
+
+
+def score_case(subject: TypedEligibilityInput[RiskFlag]) -> EligibilityResult:
+    flags = set(subject.risk_flags)
+    tier, tier_notes = _score_tier(subject, flags)
+    legal_risk, risk_notes = _score_legal_risk(subject, flags)
+    return EligibilityResult(tier=tier, legal_risk=legal_risk, notes=[*tier_notes, *risk_notes])
+
+
+def _score_tier(
+    subject: TypedEligibilityInput[RiskFlag], flags: set[RiskFlag]
+) -> tuple[MonetizationTier, list[str]]:
+    if RiskFlag.CHILD_VICTIM in flags:
+        return (
+            MonetizationTier.RED,
+            ["CHILD_VICTIM present: not eligible for ad revenue, no framing rescues this"],
+        )
+    if RiskFlag.GRAPHIC_INJURY_CENTRAL in flags:
+        return (
+            MonetizationTier.RED,
+            [
+                "GRAPHIC_INJURY_CENTRAL present: injury is the story, "
+                "no documentary framing fixes this"
+            ],
+        )
+    if RiskFlag.HATE_MOTIVATED in flags and RiskFlag.RECENT_EVENT in flags:
+        return (
+            MonetizationTier.RED,
+            ["HATE_MOTIVATED combined with RECENT_EVENT"],
+        )
+
+    if subject.documentation_score is None:
+        return (
+            MonetizationTier.UNKNOWN,
+            ["documentation_score is null: cannot score without knowing record depth"],
+        )
+
+    yellow_flags = flags & _YELLOW_FLAGS
+    if yellow_flags:
+        notes = [
+            f"{flag.value} present: default yellow, may promote to green after script-level "
+            "style pass"
+            for flag in sorted(yellow_flags, key=lambda f: f.value)
+        ]
+        return MonetizationTier.YELLOW, notes
+
+    current_year = datetime.now(UTC).year
+    recent = subject.event_year > current_year - GREEN_MIN_YEARS_SINCE_EVENT
+    thin_docs = subject.documentation_score < GREEN_MIN_DOCUMENTATION_SCORE
+    living = subject.living_persons_involved
+
+    if not recent and not thin_docs and not living:
+        return MonetizationTier.GREEN, []
+
+    notes = []
+    if recent:
+        notes.append(
+            f"event_year {subject.event_year} is within the last "
+            f"{GREEN_MIN_YEARS_SINCE_EVENT} years"
+        )
+    if thin_docs:
+        notes.append(
+            f"documentation_score {subject.documentation_score} is below the green threshold "
+            f"of {GREEN_MIN_DOCUMENTATION_SCORE}"
+        )
+    if living:
+        notes.append("living_persons_involved is true")
+    return MonetizationTier.YELLOW, notes
+
+
+def _score_legal_risk(
+    subject: TypedEligibilityInput[RiskFlag], flags: set[RiskFlag]
+) -> tuple[LegalRisk, list[str]]:
+    if RiskFlag.ONGOING_LITIGATION in flags:
+        return (
+            LegalRisk.HIGH,
+            ["ONGOING_LITIGATION present: high legal risk, do not produce"],
+        )
+
+    named_living_suspect_unconvicted = (
+        RiskFlag.NAMED_LIVING_SUSPECT in flags
+        and subject.resolution_status != ResolutionStatus.CONVICTED
+    )
+    if named_living_suspect_unconvicted:
+        return (
+            LegalRisk.HIGH,
+            [
+                "NAMED_LIVING_SUSPECT present with resolution_status="
+                f"{subject.resolution_status.value}: defamation exposure, do not produce"
+            ],
+        )
+
+    if (
+        RiskFlag.NAMED_LIVING_SUSPECT in flags
+        or subject.living_persons_involved
+        or RiskFlag.RECENT_EVENT in flags
+    ):
+        return (
+            LegalRisk.MEDIUM,
+            ["living or recent-event exposure: elevated but non-blocking legal risk"],
+        )
+
+    return LegalRisk.LOW, []

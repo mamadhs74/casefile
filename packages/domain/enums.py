@@ -4,21 +4,19 @@ These StrEnums are the contract between the persistence layer (packages/db),
 business logic (packages/research, packages/script, ...), and the API. This
 module must never import from packages/db or packages/research — everything
 else imports from here, not the other way around.
+
+CaseType and RiskFlag are NOT here. They moved to
+packages/strategies/criminal_cases/enums.py: they're that strategy's own
+category and risk vocabulary, not a universal one every strategy must share.
+See docs/SCHEMA.md's "Strategy" section for why. MonetizationTier and
+LegalRisk stay here on purpose — every strategy scores into the same output
+vocabulary, or the one-glance cross-strategy triage view stops meaning
+anything.
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
-
-
-class CaseType(StrEnum):
-    HOMICIDE = "homicide"
-    DISAPPEARANCE = "disappearance"
-    UNEXPLAINED_EVENT = "unexplained_event"
-    HISTORICAL_HORROR = "historical_horror"
-    MARITIME = "maritime"
-    DISASTER = "disaster"
-    INSTITUTIONAL_ABUSE = "institutional_abuse"
 
 
 class ResolutionStatus(StrEnum):
@@ -27,18 +25,6 @@ class ResolutionStatus(StrEnum):
     UNSOLVED = "unsolved"
     OFFICIALLY_RULED = "officially_ruled"
     DISPUTED = "disputed"
-
-
-class RiskFlag(StrEnum):
-    CHILD_VICTIM = "child_victim"
-    SEXUAL_VIOLENCE = "sexual_violence"
-    GRAPHIC_INJURY_CENTRAL = "graphic_injury_central"
-    SUICIDE_CENTRAL = "suicide_central"
-    ONGOING_LITIGATION = "ongoing_litigation"
-    NAMED_LIVING_SUSPECT = "named_living_suspect"
-    RECENT_EVENT = "recent_event"
-    POLITICAL_VIOLENCE = "political_violence"
-    HATE_MOTIVATED = "hate_motivated"
 
 
 class MonetizationTier(StrEnum):
@@ -54,7 +40,7 @@ class LegalRisk(StrEnum):
     HIGH = "high"
 
 
-class CaseStatus(StrEnum):
+class SubjectStatus(StrEnum):
     CANDIDATE = "candidate"
     RESEARCHING = "researching"
     READY = "ready"
@@ -70,6 +56,17 @@ class SourceTier(StrEnum):
     BOOK = "book"
     REFERENCE = "reference"
     UNVERIFIED = "unverified"
+
+
+class ArchiveProvider(StrEnum):
+    """docs/ARCHIVE-SPEC.md. A Strategy names which of these its sourcing may use."""
+
+    WIKIMEDIA_COMMONS = "wikimedia_commons"
+    INTERNET_ARCHIVE = "internet_archive"
+    LIBRARY_OF_CONGRESS = "library_of_congress"
+    EUROPEANA = "europeana"
+    PEXELS = "pexels"
+    PIXABAY = "pixabay"
 
 
 class FactType(StrEnum):
