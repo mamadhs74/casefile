@@ -155,6 +155,12 @@ That correlation is the real product.
   failing and say so. Removing the case is the one thing that must not happen.
 - Never widen a type, add a permissive fallback, or relax an assertion to make an error
   go away. If the constraint is wrong, say why and ask.
+- Never start a server on a port that may already be in use. Check with
+  `lsof -ti:PORT` first, and if occupied, use a different port or ask. A failed bind
+  is silent, and the requests then land on whatever is already running — which has
+  already caused a write to the real database.
+- Never issue POST, PATCH, or DELETE against a server you did not start yourself in
+  this session.
 
 ## Commit style
 
