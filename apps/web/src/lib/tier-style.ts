@@ -1,4 +1,4 @@
-import type { LegalRisk, MonetizationTier } from '../api/cases';
+import type { LegalRisk, MonetizationTier } from '../api/subjects';
 
 interface TierClasses {
   text: string;

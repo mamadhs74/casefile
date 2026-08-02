@@ -1,15 +1,14 @@
 import { Link, useSearchParams } from 'react-router';
-import { useCases } from '../api/queries';
-import type { CaseRead, CaseStatus, CaseType, MonetizationTier } from '../api/cases';
-import { caseStatusLabels, caseTypeLabels, monetizationTierLabels } from '../lib/domain';
-import { CaseCard } from '../components/cases/CaseCard';
+import { useStrategies, useSubjectNoun, useSubjects } from '../api/queries';
+import type { MonetizationTier, SubjectRead, SubjectStatus } from '../api/subjects';
+import { monetizationTierLabels, subjectStatusLabels } from '../lib/domain';
+import { SubjectCard } from '../components/subjects/SubjectCard';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Skeleton } from '../components/ui/Skeleton';
 
 const PAGE_SIZE = 24;
 
-const CASE_STATUSES = Object.keys(caseStatusLabels) as CaseStatus[];
-const CASE_TYPES = Object.keys(caseTypeLabels) as CaseType[];
+const SUBJECT_STATUSES = Object.keys(subjectStatusLabels) as SubjectStatus[];
 const TIERS = Object.keys(monetizationTierLabels) as MonetizationTier[];
 
 function FilterSelect<T extends string>({
@@ -56,24 +55,26 @@ function CardGridSkeleton() {
   );
 }
 
-function CardGrid({ items }: { items: CaseRead[] }) {
+function CardGrid({ items }: { items: SubjectRead[] }) {
   return (
     <div className={GRID_CLASSES}>
       {items.map((item) => (
-        <CaseCard key={item.id} item={item} />
+        <SubjectCard key={item.id} item={item} />
       ))}
     </div>
   );
 }
 
-export function CasesLibraryPage() {
+export function SubjectsLibraryPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const noun = useSubjectNoun();
+  const { data: strategies } = useStrategies();
 
-  const status = (searchParams.get('status') ?? undefined) as CaseStatus | undefined;
+  const status = (searchParams.get('status') ?? undefined) as SubjectStatus | undefined;
   const monetizationTier = (searchParams.get('monetization_tier') ?? undefined) as
     | MonetizationTier
     | undefined;
-  const caseType = (searchParams.get('case_type') ?? undefined) as CaseType | undefined;
+  const strategySlug = searchParams.get('strategy_slug') ?? undefined;
   const offset = Number(searchParams.get('offset') ?? 0);
 
   function updateFilter(key: string, value: string | undefined) {
@@ -90,25 +91,31 @@ export function CasesLibraryPage() {
     setSearchParams(params);
   }
 
-  const { data, isLoading, isError, error, isPlaceholderData } = useCases({
+  const { data, isLoading, isError, error, isPlaceholderData } = useSubjects({
     status,
     monetization_tier: monetizationTier,
-    case_type: caseType,
+    strategy_slug: strategySlug,
     offset,
     limit: PAGE_SIZE,
   });
 
-  const hasFilters = Boolean(status || monetizationTier || caseType);
+  const hasFilters = Boolean(status || monetizationTier || strategySlug);
+  const pluralCapitalized = noun.plural.charAt(0).toUpperCase() + noun.plural.slice(1);
+
+  const strategyOptions = strategies?.map((strategy) => strategy.slug) ?? [];
+  const strategyLabels = Object.fromEntries(
+    (strategies ?? []).map((strategy) => [strategy.slug, strategy.name]),
+  );
 
   return (
     <div className="flex max-w-6xl flex-col gap-6">
       <div className="flex items-center justify-between">
-        <h1 className="font-sans text-2xl font-semibold text-ink">Cases</h1>
+        <h1 className="font-sans text-2xl font-semibold text-ink">{pluralCapitalized}</h1>
         <Link
-          to="/cases/new"
+          to="/subjects/new"
           className="rounded-md bg-ledger-blue px-3 py-1.5 font-sans text-sm font-semibold text-paper"
         >
-          Add case
+          Add {noun.singular}
         </Link>
       </div>
 
@@ -116,8 +123,8 @@ export function CasesLibraryPage() {
         <FilterSelect
           label="Status"
           value={status}
-          options={CASE_STATUSES}
-          labels={caseStatusLabels}
+          options={SUBJECT_STATUSES}
+          labels={subjectStatusLabels}
           onChange={(v) => updateFilter('status', v)}
         />
         <FilterSelect
@@ -128,18 +135,18 @@ export function CasesLibraryPage() {
           onChange={(v) => updateFilter('monetization_tier', v)}
         />
         <FilterSelect
-          label="Case type"
-          value={caseType}
-          options={CASE_TYPES}
-          labels={caseTypeLabels}
-          onChange={(v) => updateFilter('case_type', v)}
+          label="Strategy"
+          value={strategySlug}
+          options={strategyOptions}
+          labels={strategyLabels}
+          onChange={(v) => updateFilter('strategy_slug', v)}
         />
       </div>
 
       {isError && (
         <EmptyState
           tone="error"
-          title="Couldn't load cases"
+          title={`Couldn't load ${noun.plural}`}
           description={error instanceof Error ? error.message : 'Something went wrong.'}
         />
       )}
@@ -148,17 +155,17 @@ export function CasesLibraryPage() {
 
       {!isLoading && !isError && data && data.items.length === 0 && (
         <EmptyState
-          title={hasFilters ? 'No cases match these filters' : 'No cases yet'}
+          title={hasFilters ? `No ${noun.plural} match these filters` : `No ${noun.plural} yet`}
           description={
             hasFilters ? 'Clear a filter to widen the search.' : 'Add the first one to get started.'
           }
           action={
             !hasFilters && (
               <Link
-                to="/cases/new"
+                to="/subjects/new"
                 className="rounded-md bg-ledger-blue px-3 py-1.5 font-sans text-sm font-semibold text-paper"
               >
-                Add case
+                Add {noun.singular}
               </Link>
             )
           }
@@ -215,7 +222,7 @@ const GROUPS: { tiers: MonetizationTier[]; title: string; description: string }[
   },
 ];
 
-function GroupedCards({ items }: { items: CaseRead[] }) {
+function GroupedCards({ items }: { items: SubjectRead[] }) {
   return (
     <div className="flex flex-col gap-8">
       {GROUPS.map((group) => {

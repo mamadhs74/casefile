@@ -155,6 +155,15 @@ class SourceRead(BaseModel):
 
 
 class StrategyRead(BaseModel):
+    """risk_flags and attributes_schema don't come from the Strategy table --
+
+    they're read from that strategy's *code* registration
+    (packages/research/dispatch.py) at request time. See docs/SCHEMA.md:
+    a strategy's vocabulary is code, not database configuration, and this
+    is the one place that vocabulary crosses into the API so a client never
+    has to hardcode it.
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -171,3 +180,5 @@ class StrategyRead(BaseModel):
     style_guide: dict[str, Any]
     allowed_archive_providers: list[ArchiveProvider]
     is_active: bool
+    risk_flags: list[str]
+    attributes_schema: dict[str, Any]

@@ -1,23 +1,38 @@
 import type {
-  CaseStatus,
-  CaseType,
   LegalRisk,
   MonetizationTier,
   ResolutionStatus,
-  RiskFlag,
   SourceGateFailureReason,
   SourceTier,
-} from '../api/cases';
+  SubjectStatus,
+} from '../api/subjects';
 
-export const caseTypeLabels: Record<CaseType, string> = {
-  homicide: 'Homicide',
-  disappearance: 'Disappearance',
-  unexplained_event: 'Unexplained event',
-  historical_horror: 'Historical horror',
-  maritime: 'Maritime',
-  disaster: 'Disaster',
-  institutional_abuse: 'Institutional abuse',
-};
+/**
+ * case_type and risk-flag labels used to live here as static maps. They
+ * can't anymore -- which category and risk-flag values are valid depends on
+ * which strategy a subject belongs to (packages/strategies/<slug>/), and
+ * that's no longer a single, compile-time-known set. Components fetch a
+ * strategy's own vocabulary (StrategyRead.risk_flags,
+ * StrategyRead.attributes_schema) and use humanize() below for display,
+ * rather than importing a fixed label table. See docs/SCHEMA.md.
+ */
+export function humanize(value: string): string {
+  const spaced = value.replaceAll('_', ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/**
+ * A subject's attributes are a strategy-shaped bag with no fixed field
+ * names -- criminal-cases has exactly one (case_type), a future strategy
+ * might have several or none. Rather than hardcode "case_type" here, show
+ * every value present, humanized. For criminal-cases today this reproduces
+ * exactly what the old case_type-only display showed.
+ */
+export function attributeSummary(attributes: Record<string, unknown>): string {
+  return Object.values(attributes)
+    .map((value) => humanize(String(value)))
+    .join(' · ');
+}
 
 export const resolutionStatusLabels: Record<ResolutionStatus, string> = {
   convicted: 'Convicted',
@@ -27,7 +42,7 @@ export const resolutionStatusLabels: Record<ResolutionStatus, string> = {
   disputed: 'Disputed',
 };
 
-export const caseStatusLabels: Record<CaseStatus, string> = {
+export const subjectStatusLabels: Record<SubjectStatus, string> = {
   candidate: 'Candidate',
   researching: 'Researching',
   ready: 'Ready',
@@ -65,20 +80,8 @@ export const sourceTierLabels: Record<SourceTier, string> = {
   unverified: 'Unverified',
 };
 
-export const riskFlagLabels: Record<RiskFlag, string> = {
-  child_victim: 'Child victim',
-  sexual_violence: 'Sexual violence',
-  graphic_injury_central: 'Graphic injury central',
-  suicide_central: 'Suicide central',
-  ongoing_litigation: 'Ongoing litigation',
-  named_living_suspect: 'Named living suspect',
-  recent_event: 'Recent event',
-  political_violence: 'Political violence',
-  hate_motivated: 'Hate motivated',
-};
-
 export const gateFailureReasonLabels: Record<SourceGateFailureReason, string> = {
-  insufficient_verified_sources: 'Needs 3 verified sources',
+  insufficient_verified_sources: 'Needs more verified sources',
   missing_primary_record: 'Needs a primary record',
-  insufficient_distinct_domains: 'Needs 3 distinct source domains',
+  insufficient_distinct_domains: 'Needs more distinct source domains',
 };

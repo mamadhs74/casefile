@@ -1,4 +1,4 @@
-import type { EligibilityResultRead, MonetizationTier } from '../../api/cases';
+import type { EligibilityResultRead, MonetizationTier } from '../../api/subjects';
 import { monetizationTierDescriptions } from '../../lib/domain';
 import { tierClasses } from '../../lib/tier-style';
 import { TierIcon } from './TierIcon';
@@ -13,6 +13,8 @@ interface VerdictPanelProps {
   errorMessage?: string;
   /** Human-readable names of required fields still empty, in form order. Used only when state is 'incomplete'. */
   missingFields?: string[];
+  /** The strategy's own noun, e.g. "case" -- see docs/SCHEMA.md. Falls back to "case". */
+  subjectNoun?: string;
 }
 
 function joinWithAnd(items: string[]): string {
@@ -78,6 +80,7 @@ export function VerdictPanel({
   result,
   errorMessage,
   missingFields = [],
+  subjectNoun = 'case',
 }: VerdictPanelProps) {
   if (state === 'error') {
     return (
@@ -97,8 +100,8 @@ export function VerdictPanel({
         {PANEL_HEADING}
         <p className="mt-3 text-sm text-ink-muted">
           {missingFields.length > 0
-            ? `Fill in ${joinWithAnd(missingFields)} to score this case.`
-            : 'Fill in the case above to score it.'}
+            ? `Fill in ${joinWithAnd(missingFields)} to score this ${subjectNoun}.`
+            : `Fill in the ${subjectNoun} above to score it.`}
         </p>
       </div>
     );

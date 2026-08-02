@@ -1,6 +1,6 @@
 import { monetizationTierDescriptions, monetizationTierLabels } from '../../lib/domain';
 import { tierClasses } from '../../lib/tier-style';
-import type { MonetizationTier } from '../../api/cases';
+import type { MonetizationTier } from '../../api/subjects';
 import { TierIcon } from './TierIcon';
 
 interface TierTagProps {
@@ -8,7 +8,7 @@ interface TierTagProps {
   variant?: 'tab' | 'pill';
 }
 
-/** The folder-tab colour block. Used at the top of every case card and case detail header. */
+/** The folder-tab colour block. Used at the top of every subject card and detail header. */
 export function TierTag({ tier, variant = 'pill' }: TierTagProps) {
   const classes = tierClasses[tier];
 

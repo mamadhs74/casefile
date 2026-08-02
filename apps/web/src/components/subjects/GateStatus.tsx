@@ -1,24 +1,37 @@
-import type { GateResultRead, SourceGateFailureReason } from '../../api/cases';
+import type { GateResultRead, SourceGateFailureReason } from '../../api/subjects';
 
 interface Condition {
   key: SourceGateFailureReason;
   label: string;
 }
 
+interface GateStatusProps {
+  gate: GateResultRead;
+  /** The subject's own strategy sets these -- see docs/SCHEMA.md's "Strategy" section. */
+  minVerifiedSources: number;
+  minPrimaryRecords: number;
+  minDistinctDomains: number;
+}
+
 /** Reads as a status, not a form field — the answer to "can I write this yet." */
-export function GateStatus({ gate }: { gate: GateResultRead }) {
+export function GateStatus({
+  gate,
+  minVerifiedSources,
+  minPrimaryRecords,
+  minDistinctDomains,
+}: GateStatusProps) {
   const conditions: Condition[] = [
     {
       key: 'insufficient_verified_sources',
-      label: `${gate.verified_source_count} of 3 verified sources`,
+      label: `${gate.verified_source_count} of ${minVerifiedSources} verified sources`,
     },
     {
       key: 'missing_primary_record',
-      label: `${gate.primary_record_count} of 1 primary record`,
+      label: `${gate.primary_record_count} of ${minPrimaryRecords} primary record`,
     },
     {
       key: 'insufficient_distinct_domains',
-      label: `${gate.distinct_domain_count} of 3 distinct domains`,
+      label: `${gate.distinct_domain_count} of ${minDistinctDomains} distinct domains`,
     },
   ];
 

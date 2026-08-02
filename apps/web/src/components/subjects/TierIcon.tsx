@@ -1,4 +1,4 @@
-import type { MonetizationTier } from '../../api/cases';
+import type { MonetizationTier } from '../../api/subjects';
 
 /**
  * Shape carries the same information as colour, independently — tier is the

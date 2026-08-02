@@ -21,7 +21,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/cases/preview-eligibility": {
+    "/subjects/preview-eligibility": {
         parameters: {
             query?: never;
             header?: never;
@@ -32,53 +32,53 @@ export interface paths {
         put?: never;
         /**
          * Preview Eligibility
-         * @description Score a not-yet-persisted case. Touches no DB.
+         * @description Score a not-yet-persisted subject. Touches no DB.
          */
-        post: operations["preview_eligibility_cases_preview_eligibility_post"];
+        post: operations["preview_eligibility_subjects_preview_eligibility_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/cases": {
+    "/subjects": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List Cases */
-        get: operations["list_cases_cases_get"];
+        /** List Subjects */
+        get: operations["list_subjects_subjects_get"];
         put?: never;
-        /** Create Case */
-        post: operations["create_case_cases_post"];
+        /** Create Subject */
+        post: operations["create_subject_subjects_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/cases/{case_id}": {
+    "/subjects/{subject_id}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get Case */
-        get: operations["get_case_cases__case_id__get"];
+        /** Get Subject */
+        get: operations["get_subject_subjects__subject_id__get"];
         put?: never;
         post?: never;
-        /** Delete Case */
-        delete: operations["delete_case_cases__case_id__delete"];
+        /** Delete Subject */
+        delete: operations["delete_subject_subjects__subject_id__delete"];
         options?: never;
         head?: never;
-        /** Update Case */
-        patch: operations["update_case_cases__case_id__patch"];
+        /** Update Subject */
+        patch: operations["update_subject_subjects__subject_id__patch"];
         trace?: never;
     };
-    "/cases/{case_id}/sources": {
+    "/subjects/{subject_id}/sources": {
         parameters: {
             query?: never;
             header?: never;
@@ -86,17 +86,17 @@ export interface paths {
             cookie?: never;
         };
         /** List Sources */
-        get: operations["list_sources_cases__case_id__sources_get"];
+        get: operations["list_sources_subjects__subject_id__sources_get"];
         put?: never;
         /** Create Source */
-        post: operations["create_source_cases__case_id__sources_post"];
+        post: operations["create_source_subjects__subject_id__sources_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/cases/{case_id}/gate": {
+    "/subjects/{subject_id}/gate": {
         parameters: {
             query?: never;
             header?: never;
@@ -104,7 +104,41 @@ export interface paths {
             cookie?: never;
         };
         /** Get Source Gate */
-        get: operations["get_source_gate_cases__case_id__gate_get"];
+        get: operations["get_source_gate_subjects__subject_id__gate_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/strategies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Strategies */
+        get: operations["list_strategies_strategies_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/strategies/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Strategy */
+        get: operations["get_strategy_strategies__slug__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -117,134 +151,12 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /** CaseCreate */
-        CaseCreate: {
-            /** Slug */
-            slug: string;
-            /** Title */
-            title: string;
-            case_type: components["schemas"]["CaseType"];
-            /** Event Year */
-            event_year: number;
-            /** Country */
-            country: string;
-            /** Region */
-            region?: string | null;
-            /** Summary */
-            summary: string;
-            resolution_status: components["schemas"]["ResolutionStatus"];
-            /**
-             * Living Persons Involved
-             * @default false
-             */
-            living_persons_involved: boolean;
-            /**
-             * Risk Flags
-             * @default []
-             */
-            risk_flags: components["schemas"]["RiskFlag"][];
-            /** Documentation Score */
-            documentation_score?: number | null;
-            /** Estimated Runtime Min */
-            estimated_runtime_min?: number | null;
-            /** @default candidate */
-            status: components["schemas"]["CaseStatus"];
-            /** Rejected Reason */
-            rejected_reason?: string | null;
-        };
-        /** CaseListResponse */
-        CaseListResponse: {
-            /** Items */
-            items: components["schemas"]["CaseRead"][];
-            /** Total */
-            total: number;
-            /** Offset */
-            offset: number;
-            /** Limit */
-            limit: number;
-        };
-        /** CaseRead */
-        CaseRead: {
-            /** Id */
-            id: number;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-            /** Slug */
-            slug: string;
-            /** Title */
-            title: string;
-            case_type: components["schemas"]["CaseType"];
-            /** Event Year */
-            event_year: number;
-            /** Country */
-            country: string;
-            /** Region */
-            region: string | null;
-            /** Summary */
-            summary: string;
-            resolution_status: components["schemas"]["ResolutionStatus"];
-            /** Living Persons Involved */
-            living_persons_involved: boolean;
-            /** Risk Flags */
-            risk_flags: components["schemas"]["RiskFlag"][];
-            /** Documentation Score */
-            documentation_score: number | null;
-            /** Estimated Runtime Min */
-            estimated_runtime_min: number | null;
-            monetization_tier: components["schemas"]["MonetizationTier"];
-            legal_risk: components["schemas"]["LegalRisk"];
-            /** Eligibility Notes */
-            eligibility_notes: string[];
-            status: components["schemas"]["CaseStatus"];
-            /** Rejected Reason */
-            rejected_reason: string | null;
-        };
         /**
-         * CaseStatus
+         * ArchiveProvider
+         * @description docs/ARCHIVE-SPEC.md. A Strategy names which of these its sourcing may use.
          * @enum {string}
          */
-        CaseStatus: "candidate" | "researching" | "ready" | "in_production" | "published" | "rejected";
-        /**
-         * CaseType
-         * @enum {string}
-         */
-        CaseType: "homicide" | "disappearance" | "unexplained_event" | "historical_horror" | "maritime" | "disaster" | "institutional_abuse";
-        /** CaseUpdate */
-        CaseUpdate: {
-            /** Slug */
-            slug?: string | null;
-            /** Title */
-            title?: string | null;
-            case_type?: components["schemas"]["CaseType"] | null;
-            /** Event Year */
-            event_year?: number | null;
-            /** Country */
-            country?: string | null;
-            /** Region */
-            region?: string | null;
-            /** Summary */
-            summary?: string | null;
-            resolution_status?: components["schemas"]["ResolutionStatus"] | null;
-            /** Living Persons Involved */
-            living_persons_involved?: boolean | null;
-            /** Risk Flags */
-            risk_flags?: components["schemas"]["RiskFlag"][] | null;
-            /** Documentation Score */
-            documentation_score?: number | null;
-            /** Estimated Runtime Min */
-            estimated_runtime_min?: number | null;
-            status?: components["schemas"]["CaseStatus"] | null;
-            /** Rejected Reason */
-            rejected_reason?: string | null;
-        };
+        ArchiveProvider: "wikimedia_commons" | "internet_archive" | "library_of_congress" | "europeana" | "pexels" | "pixabay";
         /** EligibilityResultRead */
         EligibilityResultRead: {
             tier: components["schemas"]["MonetizationTier"];
@@ -285,11 +197,6 @@ export interface components {
          * @enum {string}
          */
         ResolutionStatus: "convicted" | "acquitted" | "unsolved" | "officially_ruled" | "disputed";
-        /**
-         * RiskFlag
-         * @enum {string}
-         */
-        RiskFlag: "child_victim" | "sexual_violence" | "graphic_injury_central" | "suicide_central" | "ongoing_litigation" | "named_living_suspect" | "recent_event" | "political_violence" | "hate_motivated";
         /** SourceCreate */
         SourceCreate: {
             /** Url */
@@ -329,8 +236,8 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
-            /** Case Id */
-            case_id: number;
+            /** Subject Id */
+            subject_id: number;
             /** Url */
             url: string;
             /** Domain */
@@ -359,6 +266,199 @@ export interface components {
          * @enum {string}
          */
         SourceTier: "primary_record" | "contemporaneous" | "retrospective" | "book" | "reference" | "unverified";
+        /**
+         * StrategyRead
+         * @description risk_flags and attributes_schema don't come from the Strategy table --
+         *
+         *     they're read from that strategy's *code* registration
+         *     (packages/research/dispatch.py) at request time. See docs/SCHEMA.md:
+         *     a strategy's vocabulary is code, not database configuration, and this
+         *     is the one place that vocabulary crosses into the API so a client never
+         *     has to hardcode it.
+         */
+        StrategyRead: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Slug */
+            slug: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Subject Noun Singular */
+            subject_noun_singular: string;
+            /** Subject Noun Plural */
+            subject_noun_plural: string;
+            /** Min Verified Sources */
+            min_verified_sources: number;
+            /** Min Primary Records */
+            min_primary_records: number;
+            /** Min Distinct Domains */
+            min_distinct_domains: number;
+            /** Style Guide */
+            style_guide: {
+                [key: string]: unknown;
+            };
+            /** Allowed Archive Providers */
+            allowed_archive_providers: components["schemas"]["ArchiveProvider"][];
+            /** Is Active */
+            is_active: boolean;
+            /** Risk Flags */
+            risk_flags: string[];
+            /** Attributes Schema */
+            attributes_schema: {
+                [key: string]: unknown;
+            };
+        };
+        /** SubjectCreate */
+        SubjectCreate: {
+            /** Strategy Slug */
+            strategy_slug: string;
+            /** Slug */
+            slug: string;
+            /** Title */
+            title: string;
+            /** Event Year */
+            event_year: number;
+            /** Country */
+            country: string;
+            /** Region */
+            region?: string | null;
+            /** Summary */
+            summary: string;
+            resolution_status: components["schemas"]["ResolutionStatus"];
+            /**
+             * Living Persons Involved
+             * @default false
+             */
+            living_persons_involved: boolean;
+            /**
+             * Risk Flags
+             * @default []
+             */
+            risk_flags: string[];
+            /**
+             * Attributes
+             * @default {}
+             */
+            attributes: {
+                [key: string]: unknown;
+            };
+            /** Documentation Score */
+            documentation_score?: number | null;
+            /** Estimated Runtime Min */
+            estimated_runtime_min?: number | null;
+            /** @default candidate */
+            status: components["schemas"]["SubjectStatus"];
+            /** Rejected Reason */
+            rejected_reason?: string | null;
+        };
+        /** SubjectListResponse */
+        SubjectListResponse: {
+            /** Items */
+            items: components["schemas"]["SubjectRead"][];
+            /** Total */
+            total: number;
+            /** Offset */
+            offset: number;
+            /** Limit */
+            limit: number;
+        };
+        /** SubjectRead */
+        SubjectRead: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Strategy Id */
+            strategy_id: number;
+            /** Slug */
+            slug: string;
+            /** Title */
+            title: string;
+            /** Event Year */
+            event_year: number;
+            /** Country */
+            country: string;
+            /** Region */
+            region: string | null;
+            /** Summary */
+            summary: string;
+            resolution_status: components["schemas"]["ResolutionStatus"];
+            /** Living Persons Involved */
+            living_persons_involved: boolean;
+            /** Risk Flags */
+            risk_flags: string[];
+            /** Attributes */
+            attributes: {
+                [key: string]: unknown;
+            };
+            /** Documentation Score */
+            documentation_score: number | null;
+            /** Estimated Runtime Min */
+            estimated_runtime_min: number | null;
+            monetization_tier: components["schemas"]["MonetizationTier"];
+            legal_risk: components["schemas"]["LegalRisk"];
+            /** Eligibility Notes */
+            eligibility_notes: string[];
+            status: components["schemas"]["SubjectStatus"];
+            /** Rejected Reason */
+            rejected_reason: string | null;
+        };
+        /**
+         * SubjectStatus
+         * @enum {string}
+         */
+        SubjectStatus: "candidate" | "researching" | "ready" | "in_production" | "published" | "rejected";
+        /** SubjectUpdate */
+        SubjectUpdate: {
+            /** Slug */
+            slug?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Event Year */
+            event_year?: number | null;
+            /** Country */
+            country?: string | null;
+            /** Region */
+            region?: string | null;
+            /** Summary */
+            summary?: string | null;
+            resolution_status?: components["schemas"]["ResolutionStatus"] | null;
+            /** Living Persons Involved */
+            living_persons_involved?: boolean | null;
+            /** Risk Flags */
+            risk_flags?: string[] | null;
+            /** Attributes */
+            attributes?: {
+                [key: string]: unknown;
+            } | null;
+            /** Documentation Score */
+            documentation_score?: number | null;
+            /** Estimated Runtime Min */
+            estimated_runtime_min?: number | null;
+            status?: components["schemas"]["SubjectStatus"] | null;
+            /** Rejected Reason */
+            rejected_reason?: string | null;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -403,7 +503,7 @@ export interface operations {
             };
         };
     };
-    preview_eligibility_cases_preview_eligibility_post: {
+    preview_eligibility_subjects_preview_eligibility_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -412,7 +512,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CaseCreate"];
+                "application/json": components["schemas"]["SubjectCreate"];
             };
         };
         responses: {
@@ -436,12 +536,12 @@ export interface operations {
             };
         };
     };
-    list_cases_cases_get: {
+    list_subjects_subjects_get: {
         parameters: {
             query?: {
-                status?: components["schemas"]["CaseStatus"] | null;
+                status?: components["schemas"]["SubjectStatus"] | null;
                 monetization_tier?: components["schemas"]["MonetizationTier"] | null;
-                case_type?: components["schemas"]["CaseType"] | null;
+                strategy_slug?: string | null;
                 offset?: number;
                 limit?: number;
             };
@@ -457,7 +557,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CaseListResponse"];
+                    "application/json": components["schemas"]["SubjectListResponse"];
                 };
             };
             /** @description Validation Error */
@@ -471,7 +571,7 @@ export interface operations {
             };
         };
     };
-    create_case_cases_post: {
+    create_subject_subjects_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -480,7 +580,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CaseCreate"];
+                "application/json": components["schemas"]["SubjectCreate"];
             };
         };
         responses: {
@@ -490,7 +590,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CaseRead"];
+                    "application/json": components["schemas"]["SubjectRead"];
                 };
             };
             /** @description Validation Error */
@@ -504,12 +604,12 @@ export interface operations {
             };
         };
     };
-    get_case_cases__case_id__get: {
+    get_subject_subjects__subject_id__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                case_id: number;
+                subject_id: number;
             };
             cookie?: never;
         };
@@ -521,7 +621,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CaseRead"];
+                    "application/json": components["schemas"]["SubjectRead"];
                 };
             };
             /** @description Validation Error */
@@ -535,12 +635,12 @@ export interface operations {
             };
         };
     };
-    delete_case_cases__case_id__delete: {
+    delete_subject_subjects__subject_id__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                case_id: number;
+                subject_id: number;
             };
             cookie?: never;
         };
@@ -564,18 +664,18 @@ export interface operations {
             };
         };
     };
-    update_case_cases__case_id__patch: {
+    update_subject_subjects__subject_id__patch: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                case_id: number;
+                subject_id: number;
             };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CaseUpdate"];
+                "application/json": components["schemas"]["SubjectUpdate"];
             };
         };
         responses: {
@@ -585,7 +685,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CaseRead"];
+                    "application/json": components["schemas"]["SubjectRead"];
                 };
             };
             /** @description Validation Error */
@@ -599,12 +699,12 @@ export interface operations {
             };
         };
     };
-    list_sources_cases__case_id__sources_get: {
+    list_sources_subjects__subject_id__sources_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                case_id: number;
+                subject_id: number;
             };
             cookie?: never;
         };
@@ -630,12 +730,12 @@ export interface operations {
             };
         };
     };
-    create_source_cases__case_id__sources_post: {
+    create_source_subjects__subject_id__sources_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                case_id: number;
+                subject_id: number;
             };
             cookie?: never;
         };
@@ -665,12 +765,12 @@ export interface operations {
             };
         };
     };
-    get_source_gate_cases__case_id__gate_get: {
+    get_source_gate_subjects__subject_id__gate_get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                case_id: number;
+                subject_id: number;
             };
             cookie?: never;
         };
@@ -683,6 +783,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GateResultRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_strategies_strategies_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyRead"][];
+                };
+            };
+        };
+    };
+    get_strategy_strategies__slug__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyRead"];
                 };
             };
             /** @description Validation Error */

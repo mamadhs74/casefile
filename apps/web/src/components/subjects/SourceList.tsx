@@ -1,4 +1,4 @@
-import type { SourceRead } from '../../api/cases';
+import type { SourceRead } from '../../api/subjects';
 import { sourceTierLabels } from '../../lib/domain';
 
 /** A stack of retrieval slips, not a table — one card per source, scannable. */

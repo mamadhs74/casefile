@@ -1,14 +1,16 @@
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router';
-
-const NAV_ITEMS = [
-  { to: '/cases', label: 'Cases' },
-  { to: '/studio', label: 'Studio' },
-  { to: '/publishing', label: 'Publishing' },
-  { to: '/analytics', label: 'Analytics' },
-];
+import { useSubjectNoun } from '../../api/queries';
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const noun = useSubjectNoun();
+  const navItems = [
+    { to: '/subjects', label: noun.plural.charAt(0).toUpperCase() + noun.plural.slice(1) },
+    { to: '/studio', label: 'Studio' },
+    { to: '/publishing', label: 'Publishing' },
+    { to: '/analytics', label: 'Analytics' },
+  ];
+
   return (
     <div className="flex min-h-svh flex-col md:flex-row">
       <header className="flex shrink-0 flex-col border-b border-ink/10 bg-paper-raised md:h-svh md:w-56 md:border-b-0 md:border-r">
@@ -18,7 +20,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </span>
         </div>
         <nav className="flex flex-1 flex-row gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:overflow-visible">
-          {NAV_ITEMS.map((item) => (
+          {navItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

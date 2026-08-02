@@ -1,6 +1,6 @@
 import { legalRiskLabels } from '../../lib/domain';
 import { riskClasses } from '../../lib/tier-style';
-import type { LegalRisk } from '../../api/cases';
+import type { LegalRisk } from '../../api/subjects';
 
 const shortRiskLabels: Record<LegalRisk, string> = {
   low: 'LOW',

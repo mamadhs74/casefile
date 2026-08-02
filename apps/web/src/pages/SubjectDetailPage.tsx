@@ -1,27 +1,30 @@
 import { Link, useParams } from 'react-router';
-import { useCase, useCaseGate, useCaseSources } from '../api/queries';
 import {
-  caseStatusLabels,
-  caseTypeLabels,
-  resolutionStatusLabels,
-  riskFlagLabels,
-} from '../lib/domain';
-import { TierTag } from '../components/cases/TierTag';
-import { RiskFlag } from '../components/cases/RiskFlag';
-import { GateStatus } from '../components/cases/GateStatus';
-import { SourceList } from '../components/cases/SourceList';
+  useStrategies,
+  useSubject,
+  useSubjectGate,
+  useSubjectNoun,
+  useSubjectSources,
+} from '../api/queries';
+import { attributeSummary, humanize, resolutionStatusLabels, subjectStatusLabels } from '../lib/domain';
+import { TierTag } from '../components/subjects/TierTag';
+import { RiskFlag } from '../components/subjects/RiskFlag';
+import { GateStatus } from '../components/subjects/GateStatus';
+import { SourceList } from '../components/subjects/SourceList';
 import { EmptyState } from '../components/ui/EmptyState';
 import { Skeleton } from '../components/ui/Skeleton';
 
-export function CaseDetailPage() {
-  const params = useParams<{ caseId: string }>();
-  const caseId = Number(params.caseId);
+export function SubjectDetailPage() {
+  const params = useParams<{ subjectId: string }>();
+  const subjectId = Number(params.subjectId);
 
-  const caseQuery = useCase(caseId);
-  const gateQuery = useCaseGate(caseId);
-  const sourcesQuery = useCaseSources(caseId);
+  const subjectQuery = useSubject(subjectId);
+  const gateQuery = useSubjectGate(subjectId);
+  const sourcesQuery = useSubjectSources(subjectId);
+  const { data: strategies } = useStrategies();
+  const noun = useSubjectNoun();
 
-  if (caseQuery.isLoading) {
+  if (subjectQuery.isLoading) {
     return (
       <div className="flex flex-col gap-4">
         <Skeleton className="h-10 w-2/3" />
@@ -31,31 +34,33 @@ export function CaseDetailPage() {
     );
   }
 
-  if (caseQuery.isError || !caseQuery.data) {
+  if (subjectQuery.isError || !subjectQuery.data) {
     return (
       <EmptyState
         tone="error"
-        title="Case not found"
+        title="Not found"
         description={
-          caseQuery.error instanceof Error
-            ? caseQuery.error.message
-            : "This case doesn't exist, or has been removed."
+          subjectQuery.error instanceof Error
+            ? subjectQuery.error.message
+            : "This doesn't exist, or has been removed."
         }
         action={
-          <Link to="/cases" className="text-sm font-semibold text-ledger-blue">
-            Back to cases
+          <Link to="/subjects" className="text-sm font-semibold text-ledger-blue">
+            Back to {noun.plural}
           </Link>
         }
       />
     );
   }
 
-  const item = caseQuery.data;
+  const item = subjectQuery.data;
+  const strategy = strategies?.find((s) => s.id === item.strategy_id);
+  const pluralNoun = strategy?.subject_noun_plural ?? noun.plural;
 
   return (
     <div className="flex max-w-3xl flex-col gap-6">
-      <Link to="/cases" className="text-sm text-ink-muted hover:text-ledger-blue">
-        ← Back to cases
+      <Link to="/subjects" className="text-sm text-ink-muted hover:text-ledger-blue">
+        ← Back to {pluralNoun}
       </Link>
 
       <div className="overflow-hidden rounded-lg border border-ink/10 bg-paper-raised">
@@ -70,12 +75,12 @@ export function CaseDetailPage() {
           <p className="font-mono text-xs text-ink-muted">
             {item.country}
             {item.region ? `, ${item.region}` : ''} · {item.event_year} ·{' '}
-            {caseTypeLabels[item.case_type]}
+            {attributeSummary(item.attributes)}
           </p>
           <p className="text-sm text-ink">{item.summary}</p>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-muted">
             <span>{resolutionStatusLabels[item.resolution_status]}</span>
-            <span>{caseStatusLabels[item.status]}</span>
+            <span>{subjectStatusLabels[item.status]}</span>
             {item.documentation_score != null && (
               <span className="font-mono">Documentation score {item.documentation_score}</span>
             )}
@@ -91,7 +96,7 @@ export function CaseDetailPage() {
                   key={flag}
                   className="rounded border border-ink/15 px-1.5 py-0.5 font-mono text-[11px] text-ink-muted"
                 >
-                  {riskFlagLabels[flag]}
+                  {humanize(flag)}
                 </span>
               ))}
             </div>
@@ -120,7 +125,14 @@ export function CaseDetailPage() {
             }
           />
         )}
-        {gateQuery.data && <GateStatus gate={gateQuery.data} />}
+        {gateQuery.data && strategy && (
+          <GateStatus
+            gate={gateQuery.data}
+            minVerifiedSources={strategy.min_verified_sources}
+            minPrimaryRecords={strategy.min_primary_records}
+            minDistinctDomains={strategy.min_distinct_domains}
+          />
+        )}
       </section>
 
       <section className="flex flex-col gap-3">
