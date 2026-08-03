@@ -1,0 +1,17 @@
+stage                      seconds   per output minute
+narrate (azure, recorded)       1.5                 1.3
+align                          4.1                 3.6
+shots:prep shot1               0.4                 0.3
+shots:encode shot1            18.6                16.4
+shots:prep shot2               0.5                 0.5
+shots:encode shot2            18.3                16.2
+shots:prep shot3               0.2                 0.2
+shots:encode shot3            18.5                16.3
+compose:concat                 0.4                 0.3
+compose:mux (no burn)          0.6                 0.5
+------------------------------------------------------
+total                         63.0                55.7
+
+extrapolated to a 20-minute episode: 18.6 minutes
+
+peak memory -- this process (PIL decode/prep): 697 MB, child processes (ffmpeg/whisper): 296 MB
