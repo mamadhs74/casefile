@@ -4,16 +4,19 @@ Throwaway code for experiments/slice_01 -- see docs/SLICE-SPEC.md and
 FINDINGS.md. Not imported by anything, not meant to last.
 
 INPUT_DIR (overridable via SHOTS_INPUT_DIR) points at either of two source
-sets, and the encode path taken depends on what fitness.py says about each
-image:
-  - input/: a deliberate stress test, not documentary content -- full-res
-    phone/camera shots (up to ~30MB, ~36MP) picked to measure zoom/encode
-    cost at all, because real archival photos can't. These get the
-    zoompan push.
-  - input_archival/: the real Hinterkaifeck-era images, ~1000px. fitness.py
-    correctly reports no motion type is safe for these -- see FINDINGS.md's
-    product-level finding. These get a static, blurred-fill treatment
-    instead of a zoompan push (see encode_shot_static()).
+sets, kept side by side on purpose -- both are canonical, not one
+superseding the other:
+  - input_archival/ (the default): the real Hinterkaifeck-era images,
+    ~1000px. fitness.py correctly reports no motion type is safe for
+    these -- see FINDINGS.md's product-level finding. These get a static,
+    blurred-fill treatment instead of a zoompan push (see
+    encode_shot_static()). This is the realistic-case number.
+  - input/ (set SHOTS_INPUT_DIR to it explicitly): a deliberate stress
+    test, not documentary content -- full-res phone/camera shots (up to
+    ~30MB, ~36MP) picked to measure zoom/encode cost at all, because real
+    archival photos can't. These get the zoompan push. Gitignored (not
+    committed) but kept on disk as the fixed upper-bound reference for any
+    future encoder or zoom-curve change -- see FINDINGS.md.
 
 Two costs are measured separately per shot, because they come from
 different places and don't scale the same way against a real 20-minute
@@ -49,10 +52,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from packages.archive.fitness import FitnessReport, assess_fitness  # noqa: E402
 from packages.domain.enums import MotionType  # noqa: E402
 
-# Overridable so the same script can measure the deliberate oversized-stock-photo
-# stress test (input/) and the real archival-scale sources (input_archival/) as
-# two separate, comparable runs -- see FINDINGS.md's A/B test section.
-INPUT_DIR = Path(os.environ.get("SHOTS_INPUT_DIR", str(ROOT / "input")))
+# Defaults to the real archival-scale source set -- that's the realistic
+# case. Override to ROOT/"input" for the deliberate oversized-stock-photo
+# stress test, the fixed upper-bound reference -- see module docstring and
+# FINDINGS.md.
+INPUT_DIR = Path(os.environ.get("SHOTS_INPUT_DIR", str(ROOT / "input_archival")))
 WORK_DIR = ROOT / "work"
 NARRATION_PATH = WORK_DIR / "narration_azure_en-US-AriaNeural.wav"
 

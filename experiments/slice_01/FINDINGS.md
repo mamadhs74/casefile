@@ -274,7 +274,7 @@ a leftover magic number.
 crop+scale stays rejected (previous section) — `shots.py` still uses
 zoompan, just at the new prep scale.
 
-## Two real timing runs: stress test vs. the actual product case
+## Two real timing runs — both canonical, neither supersedes the other
 
 Everything above used the deliberate oversized-stock-photo stress test.
 That measures an upper bound on encode cost, not what a real episode
@@ -283,8 +283,15 @@ correctly rejects for any motion type, so `shots.py` was never actually
 exercising the code path a real case would hit. Two gaps closed to make
 this a real second measurement rather than a hypothetical one:
 
-- `shots.py`'s `INPUT_DIR` is now overridable via `SHOTS_INPUT_DIR`, so the
-  same script measures either source set without duplicating code.
+- `shots.py`'s `INPUT_DIR` is now overridable via `SHOTS_INPUT_DIR`, and
+  **defaults to `input_archival/`** — the realistic case is the default,
+  not an opt-in. `input/` (the stress-test set) is used by setting
+  `SHOTS_INPUT_DIR` explicitly. Both sets stay on disk permanently:
+  `input/`'s stock photos are gitignored (cost nothing in the repo) but
+  are the fixed upper-bound reference for measuring any future encoder or
+  zoom-curve change against — deleting them would mean no comparable
+  baseline later. `input_archival/`'s three real images are small (~900KB
+  total) and committed.
 - `shots.py` now actually *acts* on `fitness.py`'s verdict instead of just
   printing it. When `MotionType.ZOOM_IN` isn't in `allowed_motion_types`,
   `encode_shot_static()` runs instead of the zoompan push: the source is
@@ -325,12 +332,25 @@ blurred-fill on a already-tiny source is a much smaller job for
 resolution, not by what happened upstream, which is the expected and
 correct result.
 
-**8.1 minutes to render a 20-minute episode is the number that actually
-matters for planning** — the 14.0/21.2-minute figures elsewhere in this
-file are upper bounds from a deliberately worst-case source set, not a
-plan. Real cases built from thin archival records (which, per the
-product-level finding below, is most of them) should render meaningfully
-faster than the stress test suggested.
+**Both numbers are canonical — neither is provisional or superseded by the
+other:**
+- **14.0 minutes (stress test, `input/`) is the upper bound.** Fixed
+  reference for measuring any future change to the encoder, the zoom
+  curve, or `PREP_SCALE_FACTOR` against. If a future change makes this
+  number worse, that's a real regression even if the archival number looks
+  fine, because a future case *could* legitimately have large, sharp
+  sources (a well-preserved print, a modern reproduction).
+- **8.1 minutes (`input_archival/`, now `shots.py`'s default) is the
+  realistic case.** Real cases built from thin archival records — which,
+  per the product-level finding below, is most of them for a case this
+  old — should render close to this, not the stress-test number.
+
+Neither replaces the other going forward: re-run both whenever something
+upstream of `shots.py`/`compose.py` changes (encoder settings, zoom curve,
+prep scale), and expect both figures to move together in the same
+direction. If they diverge unexpectedly, that's a signal something is
+now handling one source profile differently than the other, worth
+investigating before trusting either number again.
 
 Verified visually: extracted a frame from the portrait memorial-stone shot
 (`work/shot2.mp4`) and confirmed the blurred-fill composite renders
