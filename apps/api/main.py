@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from apps.api.routers import health, sources, strategies, subjects
+from apps.api.routers import channels, health, sources, strategies, subjects
 from packages.db.session import create_all
 from packages.research.dispatch import (
     InvalidSubjectAttributesError,
@@ -81,6 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(subjects.router)
     app.include_router(sources.router)
     app.include_router(strategies.router)
+    app.include_router(channels.router)
 
     return app
 

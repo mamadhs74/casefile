@@ -147,6 +147,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/strategies/{slug}/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Channels */
+        get: operations["list_channels_strategies__slug__channels_get"];
+        put?: never;
+        /** Create Channel */
+        post: operations["create_channel_strategies__slug__channels_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/strategies/{slug}/channels/{channel_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Channel */
+        patch: operations["update_channel_strategies__slug__channels__channel_id__patch"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -157,6 +192,64 @@ export interface components {
          * @enum {string}
          */
         ArchiveProvider: "wikimedia_commons" | "internet_archive" | "library_of_congress" | "europeana" | "pexels" | "pixabay";
+        /**
+         * ChannelCreate
+         * @description No credentials field on purpose -- credentials_ref names a macOS
+         *     Keychain entry, it is never the secret itself. There is no endpoint
+         *     anywhere in this API that accepts or returns token/key material; see
+         *     CLAUDE.md's secret-handling rule and docs/SCHEMA.md.
+         */
+        ChannelCreate: {
+            platform: components["schemas"]["Platform"];
+            /** Display Name */
+            display_name: string;
+            /** External Account Id */
+            external_account_id: string;
+            /** Credentials Ref */
+            credentials_ref: string;
+            /**
+             * Is Active
+             * @default true
+             */
+            is_active: boolean;
+        };
+        /** ChannelRead */
+        ChannelRead: {
+            /** Id */
+            id: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Strategy Id */
+            strategy_id: number;
+            platform: components["schemas"]["Platform"];
+            /** Display Name */
+            display_name: string;
+            /** External Account Id */
+            external_account_id: string;
+            /** Credentials Ref */
+            credentials_ref: string;
+            /** Is Active */
+            is_active: boolean;
+        };
+        /** ChannelUpdate */
+        ChannelUpdate: {
+            /** Display Name */
+            display_name?: string | null;
+            /** External Account Id */
+            external_account_id?: string | null;
+            /** Credentials Ref */
+            credentials_ref?: string | null;
+            /** Is Active */
+            is_active?: boolean | null;
+        };
         /** EligibilityResultRead */
         EligibilityResultRead: {
             tier: components["schemas"]["MonetizationTier"];
@@ -192,6 +285,11 @@ export interface components {
          * @enum {string}
          */
         MonetizationTier: "green" | "yellow" | "red" | "unknown";
+        /**
+         * Platform
+         * @enum {string}
+         */
+        Platform: "youtube" | "tiktok" | "instagram" | "facebook";
         /**
          * ResolutionStatus
          * @enum {string}
@@ -834,6 +932,108 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StrategyRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_channels_strategies__slug__channels_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_channel_strategies__slug__channels_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChannelCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_channel_strategies__slug__channels__channel_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+                channel_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChannelUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelRead"];
                 };
             };
             /** @description Validation Error */

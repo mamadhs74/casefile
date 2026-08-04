@@ -144,6 +144,7 @@ class Platform(StrEnum):
     YOUTUBE = "youtube"
     TIKTOK = "tiktok"
     INSTAGRAM = "instagram"
+    FACEBOOK = "facebook"
 
 
 class PublicationStatus(StrEnum):

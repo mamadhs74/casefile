@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from sqlmodel import select
 
-from apps.api.deps import SessionDep
+from apps.api.deps import SessionDep, get_strategy_or_404
 from apps.api.schemas import StrategyRead
 from packages.db.models import Strategy
 from packages.research.dispatch import StrategyDefinition, get_strategy_definition
@@ -66,7 +66,5 @@ def list_strategies(session: SessionDep) -> list[StrategyRead]:
 
 @router.get("/{slug}", response_model=StrategyRead)
 def get_strategy(slug: str, session: SessionDep) -> StrategyRead:
-    strategy = session.exec(select(Strategy).where(Strategy.slug == slug)).first()
-    if strategy is None:
-        raise HTTPException(status_code=404, detail="strategy not found")
+    strategy = get_strategy_or_404(session, slug)
     return _to_strategy_read(strategy, get_strategy_definition(slug))

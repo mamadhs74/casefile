@@ -572,12 +572,72 @@ forced alignment against the rendered voice audio, not from estimation.
 
 ---
 
+## Channel
+
+A strategy's credentialed account on one platform. Publishing needs to know not just
+*which platform* but *which specific account* — a strategy may eventually run more than
+one channel on the same platform, which is exactly why `Publication` below references a
+`Channel`, not a bare `Platform` value.
+
+| field | type | notes |
+|---|---|---|
+| `strategy_id` | FK Strategy | which strategy this channel publishes for |
+| `platform` | Platform | `YOUTUBE`, `TIKTOK`, `INSTAGRAM`, `FACEBOOK` |
+| `display_name` | str | e.g. "Casefile — Criminal Archive" |
+| `external_account_id` | str | the platform's own account/channel identifier |
+| `credentials_ref` | str | **a reference, never the secret** — see below |
+| `is_active` | bool | whether this channel is currently usable for publishing |
+
+`(platform, external_account_id)` is unique — the same real-world account should never
+be registered as two different `Channel` rows. `(strategy_id, platform)` is deliberately
+**not** unique, for the reason stated above.
+
+### Credentials never live in the database
+
+`credentials_ref` names a macOS Keychain entry (resolved at publish time via the
+`keyring` package). This is not a stylistic choice — CLAUDE.md's rule is "no secrets, API
+keys, or tokens in the repo, no exceptions," and `data/casefile.db`, while gitignored,
+was never designed to reason about as a secrets store: a DB backup or a copied `data/`
+directory would leak a stored token in a way the repo's pre-commit hook can't see.
+`ChannelCreate`, `ChannelUpdate`, and `ChannelRead` structurally cannot carry a token —
+there is no `credentials` field on any of them, `extra="forbid"` turns an attempt to
+smuggle one in via `credentials` or `access_token` into a 422, and there is no endpoint
+anywhere in this API that accepts or returns credential material. The `keyring`
+integration that actually resolves `credentials_ref` at publish time is not built yet;
+this column exists so the reference has somewhere to live once it is.
+
+### Endpoints
+
+```
+GET   /strategies/{slug}/channels              list a strategy's channels
+POST  /strategies/{slug}/channels               create one
+PATCH /strategies/{slug}/channels/{channel_id}  partial update (deactivate: is_active=false)
+```
+
+No `DELETE` — a channel that's no longer usable gets deactivated, not removed, since a
+`Publication` may already reference it. No create/update endpoint accepts `strategy_id`
+in the body (it comes from the URL) for the same immutability reasoning as `Subject`.
+
+### Known gaps (tracked here — no separate backlog file exists yet)
+
+- `update_channel` doesn't special-case an `IntegrityError` from a `PATCH` that changes
+  `external_account_id` into a collision with another channel's
+  `(platform, external_account_id)`. That surfaces as an unhandled 500 today; a 409
+  belongs there instead. Untested either way.
+- `Publication.channel_id` is a required FK with no factory and no test instantiating a
+  `Publication` at all — fine while `packages/publish/` doesn't exist, but it means the
+  FK is effectively unexercised. Worth revisiting once publish adapters land, so this
+  isn't a surprise the first time something actually inserts a `Publication` row.
+
+---
+
 ## Publication, MetricSnapshot
 
 | Publication | type | notes |
 |---|---|---|
 | `episode_id` | FK Episode | |
-| `platform` | Platform | `YOUTUBE`, `TIKTOK`, `INSTAGRAM` |
+| `channel_id` | FK Channel | which credentialed account this went out through |
+| `platform` | Platform | `YOUTUBE`, `TIKTOK`, `INSTAGRAM`, `FACEBOOK` |
 | `platform_post_id` | str | the join key for analytics |
 | `url` | str | |
 | `title` | str | per-platform, they differ |
@@ -601,12 +661,12 @@ The whole point of keeping snapshots rather than totals: joining `MetricSnapshot
 `VariationProfile` is what eventually tells you which structural choices hold retention.
 Design the query path for that from the start.
 
-**Not yet built:** `Channel` (per-strategy platform credentials). `Publication.platform`
-is a bare enum for now with no link to a specific credentialed account — fine while there
-is exactly one channel per platform, which stops being true once `Channel` lands.
-Deliberately out of scope for the Strategy/Subject migration; when it's built,
-`Publication` gains a `channel_id` FK and credentials are referenced (Keychain, via
-`keyring`), never stored in the database.
+**Still not built:** the publish adapters themselves (`packages/publish/`), the OAuth
+connect flow, and the `keyring` integration. `Channel` rows exist and can be listed,
+created, and deactivated, but nothing in this codebase can actually post to a platform
+yet — `POST /strategies/{slug}/channels` registers an account's *identity*, it does not
+connect one. The frontend's Publishing page reflects this literally: an inactive channel
+renders as "Not connected" with a disabled Connect button, not a fake connected state.
 
 ---
 
@@ -637,6 +697,7 @@ so a second worker can't double-claim. Exponential backoff on retry.
 - `fact.subject_id`
 - `episode.subject_id`, `episode.stage`
 - `variation_profile.strategy_id`
-- `publication.platform_post_id` unique per platform
+- `channel.strategy_id`, `channel.(platform, external_account_id)` unique
+- `publication.channel_id`, `publication.platform_post_id` unique per platform
 - `metric_snapshot.(publication_id, captured_at)` composite
 - `job.(status, scheduled_for)` composite

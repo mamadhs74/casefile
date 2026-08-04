@@ -6,9 +6,9 @@ from collections.abc import Iterator
 from typing import Annotated
 
 from fastapi import Depends, HTTPException
-from sqlmodel import Session
+from sqlmodel import Session, select
 
-from packages.db.models import Subject
+from packages.db.models import Strategy, Subject
 from packages.db.session import get_engine
 
 
@@ -25,3 +25,10 @@ def get_subject_or_404(session: Session, subject_id: int) -> Subject:
     if subject is None:
         raise HTTPException(status_code=404, detail="subject not found")
     return subject
+
+
+def get_strategy_or_404(session: Session, slug: str) -> Strategy:
+    strategy = session.exec(select(Strategy).where(Strategy.slug == slug)).first()
+    if strategy is None:
+        raise HTTPException(status_code=404, detail="strategy not found")
+    return strategy

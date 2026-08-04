@@ -377,6 +377,38 @@ class Render(TimestampedModel, table=True):
     render_seconds: float
 
 
+class Channel(TimestampedModel, table=True):
+    """A credentialed publish target: one strategy's account on one platform.
+
+    strategy_id + platform is NOT unique -- a strategy may run more than one
+    channel on the same platform (that's the whole reason Publication gets
+    channel_id below instead of continuing to rely on platform alone).
+    (platform, external_account_id) is unique instead: the same real-world
+    account should never be registered as two different Channel rows.
+
+    credentials_ref names a macOS Keychain entry -- a reference, never the
+    secret itself. See docs/SCHEMA.md and CLAUDE.md's secret-handling rule:
+    no token, key, or credential value is ever stored in this table or
+    anywhere in the database. The keyring integration that resolves this
+    reference at publish time isn't built yet; this column exists so the
+    reference has somewhere to live once it is.
+    """
+
+    __tablename__ = "channel"
+    __table_args__ = (
+        UniqueConstraint(
+            "platform", "external_account_id", name="uq_channel_platform_external_account"
+        ),
+    )
+
+    strategy_id: int = Field(foreign_key="strategy.id", index=True)
+    platform: Platform
+    display_name: str
+    external_account_id: str
+    credentials_ref: str
+    is_active: bool = Field(default=True)
+
+
 class Publication(TimestampedModel, table=True):
     __tablename__ = "publication"
     __table_args__ = (
@@ -384,6 +416,7 @@ class Publication(TimestampedModel, table=True):
     )
 
     episode_id: int = Field(foreign_key="episode.id", index=True)
+    channel_id: int = Field(foreign_key="channel.id", index=True)
     platform: Platform
     platform_post_id: str
     url: str

@@ -16,9 +16,15 @@ from datetime import UTC, date, datetime
 
 from sqlmodel import select
 
-from packages.db.models import Source, Strategy, Subject
+from packages.db.models import Channel, Source, Strategy, Subject
 from packages.db.session import create_all, get_session
-from packages.domain.enums import ArchiveProvider, ResolutionStatus, SourceTier, SubjectStatus
+from packages.domain.enums import (
+    ArchiveProvider,
+    Platform,
+    ResolutionStatus,
+    SourceTier,
+    SubjectStatus,
+)
 from packages.strategies.criminal_cases import SLUG as CRIMINAL_CASES_SLUG
 from packages.strategies.criminal_cases.enums import CaseType, RiskFlag
 
@@ -249,6 +255,27 @@ def seed() -> None:
             ),
         ]
         session.add_all(sources)
+        session.commit()
+
+        # One inactive placeholder channel per platform -- nothing is
+        # actually connected (no OAuth flow exists yet, see
+        # apps/api/routers/channels.py), but the publishing UI needs a row
+        # to render per platform. Left empty rather than filled with
+        # plausible-looking fake names: is_active=False is what tells the
+        # frontend "not connected," and it must never depend on whether
+        # these string fields happen to be non-empty.
+        channels = [
+            Channel(
+                strategy_id=strategy_id,
+                platform=platform,
+                display_name="",
+                external_account_id="",
+                credentials_ref="",
+                is_active=False,
+            )
+            for platform in Platform
+        ]
+        session.add_all(channels)
         session.commit()
 
         for subject in subjects:

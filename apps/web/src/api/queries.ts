@@ -4,6 +4,7 @@ import {
   getStrategy,
   getSubject,
   getSubjectGate,
+  listChannels,
   listStrategies,
   listSubjects,
   listSubjectSources,
@@ -75,6 +76,13 @@ export function useStrategy(slug: string | undefined) {
     queryFn: () => getStrategy(slug as string),
     enabled: slug !== undefined,
     staleTime: Infinity,
+  });
+}
+
+export function useChannels(strategySlug: string) {
+  return useQuery({
+    queryKey: ['strategy', strategySlug, 'channels'],
+    queryFn: () => listChannels(strategySlug),
   });
 }
 

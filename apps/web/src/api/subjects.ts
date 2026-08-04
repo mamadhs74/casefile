@@ -8,6 +8,10 @@ export type EligibilityResultRead = components['schemas']['EligibilityResultRead
 export type GateResultRead = components['schemas']['GateResultRead'];
 export type SourceRead = components['schemas']['SourceRead'];
 export type StrategyRead = components['schemas']['StrategyRead'];
+export type ChannelRead = components['schemas']['ChannelRead'];
+export type ChannelCreate = components['schemas']['ChannelCreate'];
+export type ChannelUpdate = components['schemas']['ChannelUpdate'];
+export type Platform = components['schemas']['Platform'];
 export type SubjectStatus = components['schemas']['SubjectStatus'];
 export type MonetizationTier = components['schemas']['MonetizationTier'];
 export type LegalRisk = components['schemas']['LegalRisk'];
@@ -69,4 +73,29 @@ export function listStrategies(): Promise<StrategyRead[]> {
 
 export function getStrategy(slug: string): Promise<StrategyRead> {
   return apiFetch<StrategyRead>(`/strategies/${slug}`);
+}
+
+export function listChannels(strategySlug: string): Promise<ChannelRead[]> {
+  return apiFetch<ChannelRead[]>(`/strategies/${strategySlug}/channels`);
+}
+
+export function createChannel(
+  strategySlug: string,
+  payload: ChannelCreate,
+): Promise<ChannelRead> {
+  return apiFetch<ChannelRead>(`/strategies/${strategySlug}/channels`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateChannel(
+  strategySlug: string,
+  channelId: number,
+  payload: ChannelUpdate,
+): Promise<ChannelRead> {
+  return apiFetch<ChannelRead>(`/strategies/${strategySlug}/channels/${channelId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
 }

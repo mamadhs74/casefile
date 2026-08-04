@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from packages.db.models import Source, Strategy, Subject
-from packages.domain.enums import ResolutionStatus, SourceTier
+from packages.db.models import Channel, Source, Strategy, Subject
+from packages.domain.enums import Platform, ResolutionStatus, SourceTier
 from packages.strategies.criminal_cases import SLUG as CRIMINAL_CASES_SLUG
 from packages.strategies.criminal_cases.enums import CaseType
 
@@ -43,6 +43,19 @@ def make_subject(strategy_id: int, **overrides: Any) -> Subject:
     )
     defaults.update(overrides)
     return Subject(**defaults)
+
+
+def make_channel(strategy_id: int, **overrides: Any) -> Channel:
+    defaults: dict[str, Any] = dict(
+        strategy_id=strategy_id,
+        platform=Platform.YOUTUBE,
+        display_name="",
+        external_account_id="",
+        credentials_ref="",
+        is_active=False,
+    )
+    defaults.update(overrides)
+    return Channel(**defaults)
 
 
 def make_source(subject_id: int, **overrides: Any) -> Source:

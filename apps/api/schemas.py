@@ -28,6 +28,7 @@ from packages.domain.enums import (
     ArchiveProvider,
     LegalRisk,
     MonetizationTier,
+    Platform,
     ResolutionStatus,
     SourceTier,
     SubjectStatus,
@@ -182,3 +183,42 @@ class StrategyRead(BaseModel):
     is_active: bool
     risk_flags: list[str]
     attributes_schema: dict[str, Any]
+
+
+class ChannelCreate(BaseModel):
+    """No credentials field on purpose -- credentials_ref names a macOS
+    Keychain entry, it is never the secret itself. There is no endpoint
+    anywhere in this API that accepts or returns token/key material; see
+    CLAUDE.md's secret-handling rule and docs/SCHEMA.md.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    platform: Platform
+    display_name: str
+    external_account_id: str
+    credentials_ref: str
+    is_active: bool = True
+
+
+class ChannelUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = None
+    external_account_id: str | None = None
+    credentials_ref: str | None = None
+    is_active: bool | None = None
+
+
+class ChannelRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    strategy_id: int
+    platform: Platform
+    display_name: str
+    external_account_id: str
+    credentials_ref: str
+    is_active: bool
