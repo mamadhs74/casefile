@@ -8,3 +8,7 @@ data/renders/
 *.wav
 .DS_Store
 experiments/**/models/
+
+# slice experiment artifacts
+experiments/**/work/
+experiments/**/input/
