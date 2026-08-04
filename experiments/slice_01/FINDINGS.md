@@ -361,6 +361,52 @@ hard edge or flat-black letterboxing. `output/slice_delivery_archival.mp4`
 and `output/timings_archival.txt` kept alongside `_stress` versions of both
 for direct comparison.
 
+### Open product question this slice surfaced but did not solve: cheap ≠ monetizable
+
+The archival run was **100% static shots** — all three real Hinterkaifeck
+images failed `fitness.py`'s motion gate, so `encode_shot_static()` ran
+every time, with no other treatment even considered. That's exactly why
+it's the cheap number: 8.1 minutes is cheap *because* holding a still and
+blurring a copy of itself is a small job for `h264_videotoolbox` compared
+to a zoompan push. The measurement is correct. What it implies is a
+separate, unresolved problem.
+
+`docs/POLICY.md` §2, Bucket 1, is explicit: "Generic, repetitive, or
+template-based... material easily produced with AI, CGI, or templates,
+with little variation between uploads" is ineligible for monetization,
+evaluated at the **channel** level, not per video. A narrated sequence of
+held stills is a slideshow. That's the literal shape of Bucket 1,
+regardless of how well-sourced the narration is or how correctly this
+render pipeline executes the motion decision it's given — a technically
+flawless encode of a slideshow is still a slideshow. `CLAUDE.md`'s R2
+(structural variation enforced, not optional) and the architecture's
+`VariationProfile` exist because of this exact policy, but both operate
+*across* episodes and *within* an episode's macro structure (act count,
+pacing, transitions, cold-open style) — neither currently reaches down to
+whether shot 4 of 12 has any visual motion in it at all.
+
+Render cost and monetizability pull in **opposite directions** here:
+static is the cheap treatment precisely because it's the low-variation
+one, and it's forced on exactly the cases where the primary source
+material is thin — genuinely old archival records, which is not an edge
+case for this strategy, it's close to the median case (see the
+product-level finding below: real Hinterkaifeck photos cap at ~1000px,
+and a hundred-year-old unsolved case is the normal shape of "well-
+documented" here, not the exception).
+
+This is not a `shots.py`/`compose.py` problem, and this slice does not
+attempt to solve it — the render path's job is to correctly execute
+whatever per-shot treatment it's given, which it now does (measured,
+verified visually). The actual question — what a case built almost
+entirely from a handful of stills should actually *look like* to avoid
+reading as template content at the channel level — belongs in
+`packages/visual/`: generated period-appropriate B-roll, document/map
+overlays with their own real motion, present-day re-photography of
+locations that still exist, or some other deliberate source of per-shot
+variation when the archival record itself can't provide any. Recording
+this as the main thing this slice surfaced and did not solve, not a
+solved item with a follow-up ticket implied.
+
 ## Stage 4 (`compose.py`) — was video-only-in-effect; now a real two-tier encode
 
 **Before this fix, stage 4 was incomplete in a way that didn't announce
@@ -513,6 +559,13 @@ largest single memory consumer in the whole run — still well under the 8GB
 ceiling here, but worth tracking as episode length grows, since it
 processes the entire video in one pass rather than per-shot chunks.
 
+(This 21.2-minute figure predates the `PREP_SCALE_FACTOR = 1.4` change and
+the archival-source run — see "Two real timing runs" earlier in this file
+for the current numbers: 14.0 minutes is this same stress-test set's
+up-to-date figure, 8.1 minutes is the realistic archival case. Left as-is
+here since it's the milestone where subtitle burn-in specifically got
+fixed, not a re-measurement of render cost.)
+
 ## Product-level finding: archival photo resolution is a real ceiling, not a test artifact
 
 The actual Hinterkaifeck-era photographs on Wikimedia Commons cap out around
@@ -523,13 +576,18 @@ the source-gathering step; it's a property of hundred-year-old negatives and
 prints. Genuinely old archival material often cannot support a Ken Burns
 zoom at 1080p+ no matter how carefully it's sourced.
 
-This means the real pipeline needs a deliberate answer for low-resolution
-archival stills beyond "reject and hope for a better source" — e.g. static
-frame with blurred-fill background (which `fitness.py` already has the
-signals for: `meets_minimum_resolution=False` plus `requires_letterbox`),
-accepting visible softening for genuinely irreplaceable images, or leaning
-harder on illustrative/generic imagery for cases where the archival record
-is this thin. That's a product decision for `packages/visual/`, not
-something this throwaway slice needs to solve — but it's a real constraint
-the shot-list logic will hit on essentially every case this old, not an
-edge case.
+**Update — the rendering half of this is now solved, the product half is
+not.** This section originally asked for "a deliberate answer for
+low-resolution archival stills beyond reject and hope for a better
+source — e.g. static frame with blurred-fill background." That's now
+built and measured: `encode_shot_static()` in `shots.py`, dispatched
+automatically whenever `fitness.py` reports no safe motion type, verified
+both by ffprobe and visually against a real frame. `packages/visual/`
+inherits a working reference implementation, not just a suggestion.
+
+What isn't solved — see "Open product question" earlier in this file — is
+that rendering a still correctly and it being the *right creative choice*
+for a monetizable episode are different questions. The archival run being
+100% static shots is exactly this constraint showing up in practice, and
+it surfaced a second-order problem (generic/template-content risk) that
+this throwaway slice deliberately does not attempt to resolve.
