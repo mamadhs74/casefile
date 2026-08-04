@@ -7,3 +7,4 @@ data/renders/
 *.mp4
 *.wav
 .DS_Store
+experiments/**/models/
