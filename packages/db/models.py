@@ -16,8 +16,13 @@ from sqlmodel import Field, SQLModel
 from packages.domain.enums import (
     ArchiveProvider,
     AssetKind,
+    ClaimCategory,
+    ClaimConfidence,
+    ClaimType,
     ColdOpenStyle,
-    FactType,
+    EntityRole,
+    EpisodeArchitecture,
+    ImageRights,
     JobStatus,
     LegalRisk,
     LicenseType,
@@ -30,6 +35,7 @@ from packages.domain.enums import (
     SourceTier,
     SubjectStatus,
     ThumbnailComposition,
+    UniquenessCheckStatus,
 )
 
 
@@ -158,24 +164,81 @@ class Source(TimestampedModel, table=True):
     word_count: int
 
 
-class Fact(TimestampedModel, table=True):
-    __tablename__ = "fact"
+class Claim(TimestampedModel, table=True):
+    """The reconciled factual layer -- docs/SOURCING.md's claim table.
+    Scripts are written from Claims, never from Source text: the
+    architectural reason the output is original expression rather than
+    paraphrase. Renamed and extended from the old, never-wired-up Fact.
+
+    category and claim_type are deliberately separate axes: category is
+    what the claim is about (event, evidence, location, ...), claim_type is
+    how it's known (a fact about the case vs. a fact about what was
+    reported). Collapsing them would lose the ability to ask "show me all
+    evidence claims" independent of their epistemic status.
+
+    narratable defaults False and cannot be set True at creation -- see
+    packages/db/listeners.py. It can only become True once the claim has at
+    least one source and every one of them is Tier A
+    (packages.domain.enums.TIER_A_SOURCE_TIERS); this is enforced at the
+    persistence layer, not just checked at write time by convention.
+    """
+
+    __tablename__ = "claim"
 
     subject_id: int = Field(foreign_key="subject.id", index=True)
     statement: str
-    fact_type: FactType
-    occurred_at: str | None = None
-    contested: bool = False
+    category: ClaimCategory
+    claim_type: ClaimType
+    confidence: ClaimConfidence
     contested_note: str | None = None
-    confidence: float
+    # Free text, not `date`: real historical claims are often only precise
+    # to a month or a season. Forcing a `date` column would mean inventing
+    # a fake day for those. If strict chronological sorting is ever needed,
+    # add a separate nullable sort_date alongside this rather than
+    # tightening it -- see docs/SCHEMA.md.
+    date_anchor: str | None = None
+    narratable: bool = Field(default=False)
 
 
-class FactSource(TimestampedModel, table=True):
-    __tablename__ = "fact_source"
-    __table_args__ = (UniqueConstraint("fact_id", "source_id", name="uq_fact_source"),)
+class ClaimSource(TimestampedModel, table=True):
+    __tablename__ = "claim_source"
+    __table_args__ = (UniqueConstraint("claim_id", "source_id", name="uq_claim_source"),)
 
-    fact_id: int = Field(foreign_key="fact.id", index=True)
+    claim_id: int = Field(foreign_key="claim.id", index=True)
     source_id: int = Field(foreign_key="source.id", index=True)
+
+
+class Entity(TimestampedModel, table=True):
+    """A named person in a Subject's record -- docs/SOURCING.md's entity
+    table. Subject-scoped, not global: the same real person appearing
+    across multiple subjects is out of scope for this pass (no cross-
+    subject dedup exists), simpler for now and not a breaking choice to
+    revisit later.
+
+    living is indexed on purpose, not just typed: it gates render (a living,
+    named individual trips R8 and blocks render pending review) and is
+    expected to be filtered on, not just stored.
+
+    adjudicated is descriptive only for this pass -- it isn't wired into
+    LegalRisk scoring or anything else yet.
+    """
+
+    __tablename__ = "entity"
+
+    subject_id: int = Field(foreign_key="subject.id", index=True)
+    name: str
+    role: EntityRole
+    living: bool = Field(index=True)
+    adjudicated: bool
+    image_rights: ImageRights
+
+
+class ClaimEntity(TimestampedModel, table=True):
+    __tablename__ = "claim_entity"
+    __table_args__ = (UniqueConstraint("claim_id", "entity_id", name="uq_claim_entity"),)
+
+    claim_id: int = Field(foreign_key="claim.id", index=True)
+    entity_id: int = Field(foreign_key="entity.id", index=True)
 
 
 class VariationProfile(TimestampedModel, table=True):
@@ -204,7 +267,36 @@ class VariationProfile(TimestampedModel, table=True):
 
 
 class Episode(TimestampedModel, table=True):
+    """A specific thesis + architecture + ordered claim selection over a
+    Subject -- not a Subject property. Many Episodes may exist per Subject:
+    two users (or the same user twice) covering the same case are expected
+    to produce different Episodes, which is the entire reason thesis,
+    architecture, and claim selection live here and not on Subject.
+
+    generation_fingerprint hashes (thesis, architecture, ordered claim ID
+    list) -- deliberately the *input* to generation, never the generated
+    script text. Checking output-text similarity (or worse, varying LLM
+    temperature/seed to dodge such a check) is exactly the weak
+    differentiation docs/POLICY.md's Bucket 1 names: different wording over
+    an identical skeleton is still the same skeleton. It is `str | None`,
+    not `""`, on purpose -- see the UniqueConstraint below.
+
+    uniqueness_check records the result of checking generation_fingerprint
+    against a hosted uniqueness registry that is NOT built yet -- see
+    docs/SCHEMA.md. That registry does not exist, so nothing sets this to
+    VERIFIED_UNIQUE or COLLISION_DETECTED today; it only exists so the
+    column is there when the registry is. A network failure must never
+    block a user's work: LOCAL_ONLY means exactly that happened, generation
+    proceeded anyway, and only the local UNIQUE constraint below actually
+    guarded it.
+    """
+
     __tablename__ = "episode"
+    __table_args__ = (
+        UniqueConstraint(
+            "subject_id", "generation_fingerprint", name="uq_episode_subject_fingerprint"
+        ),
+    )
 
     subject_id: int = Field(foreign_key="subject.id", index=True)
     variation_profile_id: int = Field(foreign_key="variation_profile.id")
@@ -214,6 +306,10 @@ class Episode(TimestampedModel, table=True):
     structural_fingerprint: str = ""
     failed_at_stage: str | None = None
     error: str | None = None
+    thesis: str | None = None
+    architecture: EpisodeArchitecture | None = None
+    generation_fingerprint: str | None = Field(default=None, index=True)
+    uniqueness_check: UniquenessCheckStatus = Field(default=UniquenessCheckStatus.NOT_CHECKED)
 
     def advance_to(self, target: PipelineStage) -> None:
         """Move to `target`, raising IllegalStageTransitionError if not legal.
@@ -257,6 +353,23 @@ class Episode(TimestampedModel, table=True):
         self.stage = target
 
 
+class EpisodeClaim(TimestampedModel, table=True):
+    """An Episode's ordered claim selection. position preserves narrative
+    order, which architecture (not this table) determines the meaning of.
+
+    A row referencing a Claim whose narratable is not True is rejected at
+    insert -- see packages/db/listeners.py. narratable is meaningless if it
+    can be bypassed one hop downstream at episode assembly.
+    """
+
+    __tablename__ = "episode_claim"
+    __table_args__ = (UniqueConstraint("episode_id", "claim_id", name="uq_episode_claim"),)
+
+    episode_id: int = Field(foreign_key="episode.id", index=True)
+    claim_id: int = Field(foreign_key="claim.id", index=True)
+    position: int
+
+
 class Script(TimestampedModel, table=True):
     __tablename__ = "script"
 
@@ -281,10 +394,10 @@ class ScriptEdit(TimestampedModel, table=True):
 
 class ScriptCitation(TimestampedModel, table=True):
     __tablename__ = "script_citation"
-    __table_args__ = (UniqueConstraint("script_id", "fact_id", name="uq_script_citation"),)
+    __table_args__ = (UniqueConstraint("script_id", "claim_id", name="uq_script_citation"),)
 
     script_id: int = Field(foreign_key="script.id", index=True)
-    fact_id: int = Field(foreign_key="fact.id", index=True)
+    claim_id: int = Field(foreign_key="claim.id", index=True)
 
 
 class Asset(TimestampedModel, table=True):

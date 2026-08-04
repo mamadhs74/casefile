@@ -16,10 +16,24 @@ from datetime import UTC, date, datetime
 
 from sqlmodel import select
 
-from packages.db.models import Channel, Source, Strategy, Subject
+from packages.db.models import (
+    Channel,
+    Claim,
+    ClaimEntity,
+    ClaimSource,
+    Entity,
+    Source,
+    Strategy,
+    Subject,
+)
 from packages.db.session import create_all, get_session
 from packages.domain.enums import (
     ArchiveProvider,
+    ClaimCategory,
+    ClaimConfidence,
+    ClaimType,
+    EntityRole,
+    ImageRights,
     Platform,
     ResolutionStatus,
     SourceTier,
@@ -255,6 +269,104 @@ def seed() -> None:
             ),
         ]
         session.add_all(sources)
+        session.commit()
+        for source in sources:
+            session.refresh(source)
+        meridian_primary, meridian_contemporaneous, meridian_retrospective, _ = sources
+
+        # Claims and entities for meridian only -- it's the one subject with
+        # a passing source gate, so it's the one where a real narratable
+        # claim (Tier A sourcing, enforced by packages/db/listeners.py) and
+        # a real non-narratable one (Tier B only) can both be shown
+        # honestly. narratable can't be set at creation -- see
+        # NarratableSourcingError -- so claims are created False, sourced,
+        # then flipped in a second write, same sequence the invariant
+        # requires of any caller.
+        departure_claim = Claim(
+            subject_id=meridian.id,
+            statement=(
+                "The SS Meridian departed Southampton on 12 November 1948 "
+                "and was never sighted again."
+            ),
+            category=ClaimCategory.EVENT,
+            claim_type=ClaimType.FACT,
+            confidence=ClaimConfidence.ESTABLISHED,
+            date_anchor="1948-11-12",
+        )
+        inquiry_opened_claim = Claim(
+            subject_id=meridian.id,
+            statement=(
+                "Lloyd's List reported the Board of Trade inquiry had opened "
+                "by mid-November 1948."
+            ),
+            category=ClaimCategory.TIMELINE,
+            claim_type=ClaimType.CONTEMPORANEOUS_REPORT,
+            confidence=ClaimConfidence.REPORTED,
+            date_anchor="1948-11-14",
+        )
+        cold_war_speculation_claim = Claim(
+            subject_id=meridian.id,
+            statement=(
+                "Some retrospective accounts frame the disappearance within Cold War "
+                "intelligence speculation, though no primary record supports this."
+            ),
+            category=ClaimCategory.EVENT,
+            claim_type=ClaimType.DISPUTED,
+            confidence=ClaimConfidence.CONTESTED,
+            contested_note="No primary or contemporaneous source corroborates this reading.",
+            date_anchor=None,
+        )
+        claims = [departure_claim, inquiry_opened_claim, cold_war_speculation_claim]
+        session.add_all(claims)
+        session.commit()
+        for claim in claims:
+            session.refresh(claim)
+
+        session.add_all(
+            [
+                ClaimSource(claim_id=departure_claim.id, source_id=meridian_primary.id),
+                ClaimSource(
+                    claim_id=inquiry_opened_claim.id, source_id=meridian_contemporaneous.id
+                ),
+                ClaimSource(
+                    claim_id=cold_war_speculation_claim.id, source_id=meridian_retrospective.id
+                ),
+            ]
+        )
+        session.commit()
+
+        # Only the two Tier A-sourced claims can become narratable -- the
+        # retrospective-only one is left False, exactly as the gate
+        # requires: it may inform research, it may never be narrated.
+        departure_claim.narratable = True
+        inquiry_opened_claim.narratable = True
+        session.add(departure_claim)
+        session.add(inquiry_opened_claim)
+        session.commit()
+
+        captain = Entity(
+            subject_id=meridian.id,
+            name="Captain of the SS Meridian",
+            role=EntityRole.VICTIM,
+            living=False,
+            adjudicated=False,
+            image_rights=ImageRights.PUBLIC_DOMAIN,
+        )
+        inquiry_chair = Entity(
+            subject_id=meridian.id,
+            name="Board of Trade Inquiry Chair",
+            role=EntityRole.INVESTIGATOR,
+            living=False,
+            adjudicated=False,
+            image_rights=ImageRights.PUBLIC_DOMAIN,
+        )
+        entities = [captain, inquiry_chair]
+        session.add_all(entities)
+        session.commit()
+        for entity in entities:
+            session.refresh(entity)
+
+        session.add(ClaimEntity(claim_id=departure_claim.id, entity_id=captain.id))
         session.commit()
 
         # One inactive placeholder channel per platform -- nothing is

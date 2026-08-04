@@ -58,6 +58,17 @@ class SourceTier(StrEnum):
     UNVERIFIED = "unverified"
 
 
+# docs/SOURCING.md's Tier A boundary, mapped onto the finer-grained SourceTier
+# values above: citable-and-narratable sources are exactly these two. Tier B
+# (RETROSPECTIVE, BOOK, REFERENCE, UNVERIFIED) may be stored as leads but never
+# cited on a narratable Claim -- see packages/db/listeners.py. Tier C isn't
+# represented here at all: those sources are excluded at the fetch layer and
+# never become Source rows in the first place.
+TIER_A_SOURCE_TIERS: frozenset[SourceTier] = frozenset(
+    {SourceTier.PRIMARY_RECORD, SourceTier.CONTEMPORANEOUS}
+)
+
+
 class ArchiveProvider(StrEnum):
     """docs/ARCHIVE-SPEC.md. A Strategy names which of these its sourcing may use."""
 
@@ -69,7 +80,13 @@ class ArchiveProvider(StrEnum):
     PIXABAY = "pixabay"
 
 
-class FactType(StrEnum):
+class ClaimCategory(StrEnum):
+    """Subject-matter axis -- what the claim is *about*. Renamed from the old,
+    unused FactType; same seven values, so "show me all evidence claims"
+    keeps working. Orthogonal to ClaimType below, which is about how the
+    claim is *known*, not what it's about -- the two are deliberately not
+    collapsed into one field."""
+
     EVENT = "event"
     PERSON = "person"
     LOCATION = "location"
@@ -77,6 +94,67 @@ class FactType(StrEnum):
     EVIDENCE = "evidence"
     LEGAL_OUTCOME = "legal_outcome"
     AFTERMATH = "aftermath"
+
+
+class ClaimType(StrEnum):
+    """Epistemic axis -- docs/SOURCING.md's claim table `type` field. Distinct
+    from a fact about the case (FACT) is a fact about what was reported
+    (CONTEMPORANEOUS_REPORT); the script generator is required to preserve
+    this distinction in its phrasing, not flatten it."""
+
+    FACT = "fact"
+    CONTEMPORANEOUS_REPORT = "contemporaneous_report"
+    DISPUTED = "disputed"
+    INFERENCE = "inference"
+
+
+class ClaimConfidence(StrEnum):
+    ESTABLISHED = "established"
+    REPORTED = "reported"
+    CONTESTED = "contested"
+
+
+class EntityRole(StrEnum):
+    VICTIM = "victim"
+    SUSPECT = "suspect"
+    WITNESS = "witness"
+    INVESTIGATOR = "investigator"
+    COMMENTATOR = "commentator"
+
+
+class ImageRights(StrEnum):
+    PUBLIC_DOMAIN = "public_domain"
+    LICENSED = "licensed"
+    NONE = "none"
+
+
+class EpisodeArchitecture(StrEnum):
+    """docs/SOURCING.md's variation manifest. Selects narrative structure in
+    stage 1; not to be confused with VariationProfile's render-level
+    dimensions (cold open style, pacing, transitions), which it will
+    eventually influence once packages/script exists to wire the two
+    together -- see docs/SCHEMA.md."""
+
+    CHRONOLOGICAL = "chronological"
+    INVESTIGATION_LED = "investigation_led"
+    RECORD_FORWARD = "record_forward"
+    MISCONCEPTION = "misconception"
+    OPEN_QUESTION = "open_question"
+    CONTEXT_FIRST = "context_first"
+
+
+class UniquenessCheckStatus(StrEnum):
+    """Result of checking an Episode's generation_fingerprint against the
+    (not-yet-built) hosted uniqueness registry -- see docs/SCHEMA.md.
+    LOCAL_ONLY means the registry was unreachable: generation proceeded
+    anyway (a network failure must never block a user's work), verified
+    only against this installation's own Episodes via the DB-level
+    UNIQUE(subject_id, generation_fingerprint) constraint."""
+
+    NOT_CHECKED = "not_checked"
+    LOCAL_ONLY = "local_only"
+    VERIFIED_UNIQUE = "verified_unique"
+    COLLISION_DETECTED = "collision_detected"
 
 
 class PipelineStage(StrEnum):

@@ -369,32 +369,167 @@ scoring is code). Returns structured failure reasons, not a bare bool.
 
 ---
 
-## Fact
+## Claim, ClaimSource
 
-The reconciled factual layer. Scripts are written from Facts, never from Source text.
-This is the architectural reason the output is original expression rather than paraphrase.
+docs/SOURCING.md's claim table -- the reconciled factual layer. Scripts are written from
+Claims, never from Source text. This is the architectural reason the output is original
+expression rather than paraphrase. Renamed and extended from the old, never-wired-up
+`Fact`/`FactSource`: nothing outside `packages/db/models.py` referenced either, so the
+rename cost nothing and there was no reason to keep two names for the same concept.
 
 | field | type | notes |
 |---|---|---|
-| `subject_id` | FK Subject | renamed from `case_id` |
-| `statement` | str | one atomic fact, plainly worded |
-| `fact_type` | FactType | |
-| `occurred_at` | str \| None | free-text date, may be approximate |
-| `contested` | bool | sources disagree |
-| `contested_note` | str \| None | how they disagree |
-| `confidence` | float 0–1 | |
+| `subject_id` | FK Subject | |
+| `statement` | str | one atomic claim, plainly worded |
+| `category` | ClaimCategory | subject-matter axis — renamed from `FactType`, same 7 values |
+| `claim_type` | ClaimType | epistemic axis — docs/SOURCING.md's `type` field |
+| `confidence` | ClaimConfidence | replaces the old float 0–1 |
+| `contested_note` | str \| None | how sources disagree; only meaningful when `confidence == CONTESTED`, not DB-enforced |
+| `date_anchor` | str \| None | free text, not `date` — see below |
+| `narratable` | bool, default `False` | the core invariant — see below |
 
-`FactType`: `EVENT`, `PERSON`, `LOCATION`, `TIMELINE`, `EVIDENCE`, `LEGAL_OUTCOME`,
-`AFTERMATH`.
+```python
+class ClaimCategory(StrEnum):
+    EVENT = "event"
+    PERSON = "person"
+    LOCATION = "location"
+    TIMELINE = "timeline"
+    EVIDENCE = "evidence"
+    LEGAL_OUTCOME = "legal_outcome"
+    AFTERMATH = "aftermath"
 
-**`FactSource`** — join table (`fact_id`, `source_id`). A Fact with fewer than 2 sources
-is flagged `contested=True` automatically unless its single source is `PRIMARY_RECORD`.
+
+class ClaimType(StrEnum):
+    FACT = "fact"
+    CONTEMPORANEOUS_REPORT = "contemporaneous_report"
+    DISPUTED = "disputed"
+    INFERENCE = "inference"
+
+
+class ClaimConfidence(StrEnum):
+    ESTABLISHED = "established"
+    REPORTED = "reported"
+    CONTESTED = "contested"
+```
+
+`category` and `claim_type` are deliberately separate axes, not collapsed into one
+field: `category` is what the claim is *about*, `claim_type` is *how it's known*.
+Collapsing them would lose the ability to ask "show me all evidence claims" independent
+of epistemic status.
+
+`date_anchor` stays `str`, not `date`: real historical claims are often only precise to
+a month or a season, and forcing a `date` column would mean inventing a fake day for
+those. If strict chronological sorting is ever needed (e.g. for the `chronological`
+episode architecture below), add a separate nullable `sort_date` alongside this rather
+than tightening it.
+
+**`ClaimSource`** — join table (`claim_id`, `source_id`), renamed from `FactSource`.
+
+### The narratable invariant
+
+This is the whole point of the spec: **a narratable claim's sourcing must be exclusively
+Tier A.** Not "at least one Tier A source among otherwise-mixed sourcing" — every linked
+source, full stop. `packages.domain.enums.TIER_A_SOURCE_TIERS` names exactly
+`PRIMARY_RECORD` and `CONTEMPORANEOUS`; Tier B (`RETROSPECTIVE`, `BOOK`, `REFERENCE`,
+`UNVERIFIED`) may inform research but may never be cited on a narratable claim, and Tier
+C isn't represented in `SourceTier` at all — those sources are excluded at the fetch
+layer and never become `Source` rows in the first place.
+
+Enforced at the persistence layer (`packages/db/listeners.py`), not by convention, across
+five touchpoints — because there are five different writes that could otherwise put a
+narratable Claim into a state where the invariant no longer holds:
+
+1. **`Claim.before_insert`** — `narratable=True` is rejected outright. A Claim can't
+   cite a source before it exists (`ClaimSource.claim_id` requires the row already be
+   there), so this isn't really a check, it falls out of FK ordering for free.
+2. **`Claim.before_update`** — flipping `narratable` to `True` requires at least one
+   linked source, and every one of them must be Tier A.
+3. **`ClaimSource.before_insert`** — attaching a new source to an already-narratable
+   claim is rejected if that source isn't Tier A. Prevents silently degrading a claim
+   after the fact.
+4. **`ClaimSource.before_delete`** — removing a narratable claim's *last* source is
+   rejected. Without this, deleting a claim's only source would leave it vacuously
+   "all sources are Tier A" (there being none) while violating the actual requirement
+   — at least one Tier A source, not just no bad ones.
+5. **`Source.before_update`** — downgrading a source's tier is rejected if it's
+   currently cited by any narratable claim. Closes the gap where a claim would
+   silently become invalid without anything about the claim itself changing.
+
+All five raise (`NarratableSourcingError`) rather than silently correcting the write:
+coercing `narratable` to a value the caller didn't ask for would look like their write
+succeeded when it didn't, which is a worse failure mode than a clean rejection.
+
+**Trust boundary, same as everywhere else in this file:** these are ORM-level
+guarantees, not raw-SQL-proof triggers. A direct `sqlite3` write against the `.db` file
+bypasses all five listeners, the same way it would bypass `Subject`'s scoring or
+`Source`'s domain derivation. Nothing here changes that trust model, it just applies it
+to a new invariant.
+
+---
+
+## Entity, ClaimEntity
+
+docs/SOURCING.md's entity table — a named person in a Subject's record. Subject-scoped,
+not global: the same real person appearing across multiple subjects is out of scope for
+this pass (no cross-subject dedup exists). Simpler for now, and not a breaking choice to
+revisit later if cross-subject entity reuse ever becomes a real requirement.
+
+| field | type | notes |
+|---|---|---|
+| `subject_id` | FK Subject | |
+| `name` | str | |
+| `role` | EntityRole | |
+| `living` | bool, **indexed** | gates render — see below |
+| `adjudicated` | bool | descriptive only, not wired into anything yet |
+| `image_rights` | ImageRights | |
+
+```python
+class EntityRole(StrEnum):
+    VICTIM = "victim"
+    SUSPECT = "suspect"
+    WITNESS = "witness"
+    INVESTIGATOR = "investigator"
+    COMMENTATOR = "commentator"
+
+
+class ImageRights(StrEnum):
+    PUBLIC_DOMAIN = "public_domain"
+    LICENSED = "licensed"
+    NONE = "none"
+```
+
+`living=True` on any entity trips docs/POLICY.md's R8 and blocks render pending review.
+(POLICY.md's "Derived engineering requirements" table numbers its own rules
+independently of CLAUDE.md's R1–R7 — they collide on numbers without sharing content;
+"R8" here is POLICY.md's.) `living` is indexed, not just typed, because it's expected to
+be filtered on directly once render gating exists, not just stored. `image_rights=NONE`
+blocks that entity from stage 3 shot selection. Neither consuming check is built yet —
+these columns exist so they have somewhere to read from once they are.
+
+`adjudicated` is stored but purely descriptive for this pass — it isn't wired into
+`LegalRisk` scoring or anything else. What it should eventually gate is an open
+question, not a decided one.
+
+**Known gap, not addressed here:** `Subject.living_persons_involved` and `Entity.living`
+are now two independent sources of truth for a closely related fact, and nothing keeps
+them in sync — a Subject could have `living_persons_involved=False` while one of its
+Entities has `living=True`, and nothing will catch that. Deliberately not wiring a
+cross-model computation (mirroring how `Subject.monetization_tier` is computed) in a
+stage-1-data-layer-only pass. Worth revisiting once something actually reads
+`Entity.living` for render gating.
+
+**`ClaimEntity`** — join table (`claim_id`, `entity_id`), mirroring `ClaimSource`'s shape.
 
 ---
 
 ## Episode
 
-One production run.
+One production run: a specific thesis + architecture + ordered claim selection over a
+Subject — not a Subject property. Many Episodes may exist per Subject; this was already
+true before docs/SOURCING.md's uniqueness requirement (no constraint ever forced one
+Episode per Subject), but it's now the load-bearing reason thesis, architecture, and
+claim selection live here rather than on Subject: two users, or the same user twice,
+covering the same case are expected to produce different Episodes.
 
 | field | type | notes |
 |---|---|---|
@@ -403,9 +538,13 @@ One production run.
 | `stage` | PipelineStage | current position |
 | `gate_a_approved_at` | datetime \| None | script approval |
 | `gate_b_approved_at` | datetime \| None | cut approval |
-| `structural_fingerprint` | str | hash of the variation dimensions |
+| `structural_fingerprint` | str | hash of the *render*-level variation dimensions (R2) |
 | `failed_at_stage` | str \| None | |
 | `error` | str \| None | |
+| `thesis` | str \| None | human-authored; required before render, not at creation |
+| `architecture` | EpisodeArchitecture \| None | docs/SOURCING.md's variation manifest |
+| `generation_fingerprint` | str \| None, **indexed** | hash of (thesis, architecture, ordered claim IDs) — see below |
+| `uniqueness_check` | UniquenessCheckStatus | result of the (unbuilt) hosted registry check — see below |
 
 ```python
 class PipelineStage(StrEnum):
@@ -424,11 +563,123 @@ class PipelineStage(StrEnum):
     PUBLISHING = "publishing"
     PUBLISHED = "published"
     FAILED = "failed"
+
+
+class EpisodeArchitecture(StrEnum):
+    CHRONOLOGICAL = "chronological"
+    INVESTIGATION_LED = "investigation_led"
+    RECORD_FORWARD = "record_forward"
+    MISCONCEPTION = "misconception"
+    OPEN_QUESTION = "open_question"
+    CONTEXT_FIRST = "context_first"
+
+
+class UniquenessCheckStatus(StrEnum):
+    NOT_CHECKED = "not_checked"
+    LOCAL_ONLY = "local_only"
+    VERIFIED_UNIQUE = "verified_unique"
+    COLLISION_DETECTED = "collision_detected"
 ```
 
 Stage transitions go through `Episode.advance_to(stage)`, which validates the transition
 is legal. No direct assignment. Unaffected by the strategy generalization — it operates
 entirely on `PipelineStage` and gate-approval timestamps, never on subject content.
+
+`thesis` and `architecture` are nullable at creation — an Episode exists from `CREATED`,
+long before either is chosen — and enforced non-empty/non-null at a render gate check,
+not by a `NOT NULL` column. Same treatment `structural_fingerprint` already gets.
+`architecture` selects narrative structure in stage 1; it is **not** yet wired to
+`VariationProfile`'s render-level dimensions (cold open style, pacing, transitions),
+though docs/SOURCING.md says it eventually should be ("architecture selects the visual
+grammar and pacing profile in `compose.py`"). That's `packages/script` integration work
+that doesn't exist yet — same unbuilt status as `VariationProfile`'s own similarity
+check below.
+
+### `EpisodeClaim`
+
+Ordered claim selection: `episode_id`, `claim_id`, `position` (preserves narrative
+order), `UniqueConstraint(episode_id, claim_id)`. A row referencing a Claim whose
+`narratable` isn't `True` is rejected at insert (`NonNarratableClaimError`) —
+`narratable` is meaningless if it can be bypassed one hop downstream at episode
+assembly, so the same persistence-layer enforcement approach used for the Claim/Source
+invariant above applies here too.
+
+### Cross-user uniqueness: combinatorial, not stochastic
+
+The product requirement: two users (or the same user twice) researching the same
+subject must not produce similar scripts, and that guarantee must be **combinatorial**
+— thesis × architecture × ordered claim subset — not stochastic. Varying an LLM's
+temperature or seed to get different wording over an identical skeleton is not
+structural variation; it's docs/POLICY.md's Bucket 1 with extra steps.
+
+`generation_fingerprint` hashes (thesis, architecture, ordered claim ID list) —
+deliberately the *input* to generation, never the generated script text. Checking
+output-text similarity (or dodging such a check by varying temperature/seed) is exactly
+the weak differentiation described above: different wording over the same skeleton is
+still the same skeleton. Hashing structured input instead of prose also means only a
+hash, never the raw thesis, ever needs to leave the machine — relevant below.
+
+Two different guarantees exist here, at two different strengths:
+
+- **Exact-duplicate floor, enforced now:** `UniqueConstraint(subject_id,
+  generation_fingerprint)`. A hard DB-level guarantee against byte-identical
+  (thesis, architecture, claim subset) combinations, *within one installation.*
+  `generation_fingerprint` is `str | None`, defaulting to `None` and not `""` — SQL
+  unique constraints don't exempt empty string the way they exempt `NULL`, and Episodes
+  exist from `CREATED`, long before a fingerprint can be computed, so several
+  unfingerprinted episodes for the same subject need to coexist without colliding
+  against each other.
+- **Semantic-similarity check, not built:** two theses that are substantively the same
+  idea in different words won't collide on this exact-match constraint. Closing that
+  gap is generation-side work (comparable to `VariationProfile`'s own unimplemented
+  cosine-similarity check for R2, below) that belongs in `packages/script`, not the
+  data layer — the schema stores everything such a check would need (raw thesis text,
+  ordered claim IDs), it just doesn't run one yet.
+
+### The hosted registry — not built; schema and seam ready for it
+
+**No cross-installation uniqueness guarantee is possible without a hosted component.**
+Two customers each running their own local SQLite database have zero visibility into
+each other's installation; a `UNIQUE` constraint only ever sees this machine's own
+Episode history. Local-only can widen the combinatorial space (architecture is a 1-in-6
+draw, thesis is human-authored high-entropy text) but that's probabilistic breadth, not
+a guarantee — "unlikely to collide" and "cannot collide" are different claims, and only
+the second is an actual guarantee.
+
+Decision: build for a **thin hosted registry**, not a full backend. The contract, for
+whenever `packages/script` exists to call it:
+
+```
+check_uniqueness(subject_hash: str, fingerprint_hash: str) -> UniquenessCheckStatus
+```
+
+Receives only two hashes — never thesis text, claim data, or generated scripts. Because
+`generation_fingerprint` is already computed from structured input rather than output
+prose, nothing sensitive needs to cross the network for this to work. **A network
+failure must never block a user's work:** if the registry is unreachable, generation
+proceeds anyway, `uniqueness_check` is set to `LOCAL_ONLY`, and only the local `UNIQUE`
+constraint above actually guarded it. No stub client module exists yet — there's no
+caller to wire it into until `packages/script` does, and building one ahead of a real
+consumer was a deliberate choice not to make, same reasoning as `Channel`'s publish
+adapters.
+
+**Two open product questions, deliberately left unsolved here:**
+
+- **What does `COLLISION_DETECTED` actually trigger?** A hard block forcing
+  regeneration (mirroring how `VariationExhaustedError` already refuses to silently
+  proceed on R2's similarity check), or just a flagged warning? Not decided — recording
+  it now so it isn't a surprise the first time the registry exists and actually returns
+  one.
+- **What makes two independently-run installations agree they're covering the same
+  real-world subject, before a fingerprint registry means anything at all?**
+  `subject.slug` is arbitrary per-installation text — one user's
+  `hinterkaifeck-murders` and another's `hinterkaifeck-farm-case` would hash
+  differently, and the registry would never detect they're the same case. A hash of
+  `(strategy.slug, event_year, normalized title)` is the obvious starting point but is
+  genuinely fragile against title variation; a canonical external identifier (a
+  Wikidata ID, a court case number) would be more robust if one exists for a given
+  subject, but nothing here resolves one. This is the hardest part of the hosted
+  service and the part most likely to be forgotten if it isn't written down now.
 
 ---
 
@@ -486,8 +737,8 @@ Do not silently proceed.
 `version_after`, `diff` (unified), `edited_at`. These are the audit trail proving
 editorial control. Never delete them.
 
-**`ScriptCitation`** — join (`script_id`, `fact_id`) recording which facts a script draws
-on. A script citing fewer than 8 distinct facts is suspiciously thin; warn.
+**`ScriptCitation`** — join (`script_id`, `claim_id`) recording which claims a script
+draws on. A script citing fewer than 8 distinct claims is suspiciously thin; warn.
 
 ---
 
@@ -628,6 +879,9 @@ in the body (it comes from the URL) for the same immutability reasoning as `Subj
   `Publication` at all — fine while `packages/publish/` doesn't exist, but it means the
   FK is effectively unexercised. Worth revisiting once publish adapters land, so this
   isn't a surprise the first time something actually inserts a `Publication` row.
+- `docs/ARCHIVE-SPEC.md` line 196 still references the old `Case`/`Fact` naming
+  (`Case` was already renamed to `Subject`, `Fact` is now `Claim`) — doubly stale, not
+  fixed here since it's a different document outside this pass's scope.
 
 ---
 
@@ -694,8 +948,9 @@ so a second worker can't double-claim. Exponential backoff on retry.
 - `strategy.slug` unique
 - `subject.slug` unique, `subject.strategy_id`, `subject.status`, `subject.monetization_tier`
 - `source.subject_id`, `source.text_sha256`
-- `fact.subject_id`
-- `episode.subject_id`, `episode.stage`
+- `claim.subject_id`
+- `entity.subject_id`, `entity.living`
+- `episode.subject_id`, `episode.stage`, `episode.generation_fingerprint`, `episode.(subject_id, generation_fingerprint)` unique
 - `variation_profile.strategy_id`
 - `channel.strategy_id`, `channel.(platform, external_account_id)` unique
 - `publication.channel_id`, `publication.platform_post_id` unique per platform
