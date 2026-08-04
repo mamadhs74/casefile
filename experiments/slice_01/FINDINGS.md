@@ -139,6 +139,128 @@ whether that holds for a 20-minute episode's worth of shots run back-to-back
 is still an open question — this run never had more than one decoded image
 in memory at a time.
 
+## A/B test (`ab_test_zoom.py`): why shots:encode is 5x slower than compose:deliver
+
+The prompt for this: `shots:encode` runs at ~1.26x realtime (54.4s of the
+72.4s total run) while `compose:deliver` — same encoder, same 1920x1080
+output, same machine — runs at ~6.2x realtime. Hypothesis: zoompan's
+`scale=iw*4:ih*4` step rescales the *entire* prepped frame every output
+frame, at a fixed cost regardless of how tight the crop is, so
+`h264_videotoolbox` sits idle waiting on the filter graph rather than being
+the bottleneck itself. Two things tested against the current 2.0x/2160p
+zoompan default; **the default in `shots.py` was not changed by this
+test** — it only measures.
+
+### Part 1 — prep scale factor vs. zoompan cost
+
+Re-prepped each of the three source images at 2.0x, 1.4x, and 1.2x output
+height (2160p / 1512p / 1296p) and re-ran the exact same zoompan encode
+(`-b:v 20M`, same zoom curve, same duration) against each:
+
+```
+scale 2.0x (2160p): avg 18.17s/shot  (1.25x realtime)  peak RSS ~280MB
+scale 1.4x (1512p): avg 10.04s/shot  (2.25x realtime)  peak RSS ~178MB
+scale 1.2x (1296p): avg  7.66s/shot  (2.95x realtime)  peak RSS ~152MB
+```
+
+Confirms the hypothesis directly: lower prep resolution costs meaningfully
+less, close to the O(n²) scaling you'd expect from rescaling fewer pixels
+per frame (linear-dimension ratios of 2160:1512:1296 ≈ 1 : 0.70 : 0.60,
+squared ≈ 1 : 0.49 : 0.36; measured time ratios were 1 : 0.55 : 0.42 —
+same direction, roughly the right magnitude).
+
+**Visual quality check, tightest zoom (last frame, zoom=1.3x), largest
+source (Poggersdorf, 7360×4912):** cropped into the highest-frequency
+detail in frame — bare tree branches against sky — at all three scale
+factors. No perceptible softening at any of the three, including 1.2x.
+Worth being precise about why: at zoom=1.3x, the *effective* source
+resolution feeding the final 1920px-wide frame is prep_width / 1.3. For
+1.2x prep (~1944px wide), that's ~1495px — technically *below* 1920px,
+meaning the last frame is very slightly upscaled, not downscaled. It isn't
+visible on this content (soft winter branches, no fine text or hard edges),
+but that's a property of *this* test content, not a guarantee — real
+archival material with document text or sharp edges (e.g. the
+`Aussageprotokoll` witness-statement scans mentioned in the product-level
+finding below) would show upscaling artifacts sooner. 1.4x prep stays at
+native resolution or better through the whole zoom range for these
+aspect ratios (~1.5); 1.2x is the more aggressive choice.
+
+Note this is a different question from what `fitness.py`'s
+`FULL_MOTION_LONG_EDGE_PX` (2496px) gates — that threshold is about whether
+the *original candidate photo* is fit to push-zoom at all. This test is
+about how far an *already-qualified* image can be downscaled before
+handing it to zoompan, purely for render-speed reasons. A 1.4x-prepped
+7360px source and a fitness-gated 2496px source are different concerns
+that happen to land in a similar range by coincidence of this test's
+numbers, not because they're the same gate.
+
+### Part 2 — zoompan vs. crop+scale (both at the 2.0x/2160p default prep)
+
+Replaced zoompan with a filter chain that crops a shrinking window
+directly out of the prepped frame (`crop=w='iw/zoom(t)':h='ih/zoom(t)':...`
+with `zoom(t)` ramping 1.0→1.3 over the clip) and scales just that window
+up to 1920x1080 — no 4x full-frame upscale at all. Prediction going in:
+this should be dramatically cheaper, since it processes far fewer pixels
+per frame (a shrinking ~3241px→2493px crop region vs. zoompan's fixed
+~12964px canvas every frame).
+
+**That prediction was wrong — no meaningful speedup:**
+
+```
+zoompan    @2.0x prep: avg 18.17s/shot (1.25x realtime)
+crop+scale @2.0x prep: avg 17.88s/shot (1.27x realtime)
+speedup: 1.02x -- a wash
+```
+
+Most likely explanation: `crop`'s output dimensions change on nearly every
+frame (the crop rectangle shrinks continuously), which forces the
+downstream `scale` filter to reinitialize its resampling context on
+essentially every frame instead of reusing one fixed-size context for the
+whole clip — a well-known ffmpeg cost that likely erases whatever was saved
+by processing fewer raw pixels. Not confirmed by profiling ffmpeg
+internals, but consistent with the numbers and standard behavior of
+per-frame-varying `scale` parameters.
+
+**Motion smoothness — worse, not equivalent.** Extracted 6 consecutive
+frames mid-clip for both approaches and measured frame-to-frame mean
+absolute pixel difference (grayscale) as a jerkiness proxy — smooth motion
+should show fairly consistent diffs frame to frame; stepping shows
+alternating near-zero (stuck/repeated frame) and large (multi-pixel jump)
+diffs:
+
+```
+zoompan     diffs=[6.94, 7.80, 6.90, 6.20, 7.95]  mean=7.16  variance=0.41
+crop+scale  diffs=[0.14, 9.72, 12.67, 0.17, 12.73]  mean=7.09  variance=33.20
+```
+
+zoompan's diffs are tight and consistent (variance 0.41) — smooth,
+continuous motion, confirming its 4x-upscale trick does what
+docs/SLICE-SPEC.md says it does. crop+scale's diffs alternate between
+near-zero and large jumps (variance 33.2, ~80x higher) — two of the five
+gaps are near-frozen frames followed by a 2-pixel-equivalent jump. This is
+exactly the integer-pixel-rounding stepping problem SLICE-SPEC's zoompan
+note originally warned about, just relocated to `crop`'s rectangle instead
+of zoompan's canvas: cropping directly from a 2160p-scale frame (not
+upscaled 4x first) means each frame's crop width can only take on
+relatively few distinct integer values across a 679-frame clip, so
+consecutive frames frequently round to the identical crop size.
+
+**Conclusion: crop+scale is not a win.** No speed advantage (1.02x, noise
+level) and materially worse smoothness. It would likely need its own
+upscale-before-crop step to fix the stepping, at which point it's paying a
+similar cost to zoompan for a similar reason and the whole exercise loses
+its point. Not recommending it; `shots.py` still uses zoompan.
+
+### Recommendation (not applied — `shots.py`'s default prep scale is unchanged)
+
+Prep scale factor is the real, validated lever: 2.0x→1.4x cuts
+`shots:encode` from 18.2s to 10.0s/shot (45% less) with no visible quality
+loss on this content; 2.0x→1.2x cuts it to 7.7s (58% less) but starts
+technically upscaling at the tightest zoom, unverified on harder content.
+1.4x looks like the safer default to switch to if/when this stops being
+throwaway code; 1.2x is worth a second look specifically against
+text/document-heavy archival scans before trusting it generally.
+
 ## Stage 4 (`compose.py`) — was video-only-in-effect; now a real two-tier encode
 
 **Before this fix, stage 4 was incomplete in a way that didn't announce
