@@ -139,32 +139,89 @@ whether that holds for a 20-minute episode's worth of shots run back-to-back
 is still an open question — this run never had more than one decoded image
 in memory at a time.
 
-## Stage 4 (`compose.py`) — subtitle burn-in blocked by the ffmpeg build, not the code
+## Stage 4 (`compose.py`) — was video-only-in-effect; now a real two-tier encode
 
-Concat demuxer + `-c copy` stitched the three clips in 0.3-0.4s, as expected
-— no re-encoding, just container-level work.
+**Before this fix, stage 4 was incomplete in a way that didn't announce
+itself.** `mux()` fell back to `-c:v copy` whenever subtitle burn-in wasn't
+available (which was every run, see below) — meaning the "final" video
+stream was a byte-for-byte remux of `work/concat.mp4`, not an encode at
+all. Audio *was* attached, so `output/slice.mp4` played with sound and
+looked done, but there was no delivery-quality control anywhere: video
+stayed at whatever the per-shot intermediates happened to produce (~14.4
+Mbps, `yuvj420p` full-range, straight from JPEG decode), and audio rode
+`ffmpeg`'s bare `-c:a aac` default (24kHz mono passthrough, not a real
+delivery spec). `ffprobe` on `work/concat.mp4` — video-only by design, since
+it's the pre-mux intermediate — was the thread that unraveled this: its
+bitrate and pixel format turned out to be *identical* to the final output's,
+which is only possible if the final pass never actually encoded anything.
 
-Subtitle burn-in did not happen this run. The installed ffmpeg is Homebrew's
-regular `ffmpeg` formula, which — it turns out — ships without `libass`
-*and* without `freetype`, so neither the `ass` filter nor `drawtext` exists
-in this build at all. The full-featured build lives in the
-`homebrew-ffmpeg/ffmpeg` tap, but its bottle isn't published for this OS
-version, so installing it means compiling from source — which failed
-because this machine's Xcode Command Line Tools (16.0) are older than what
-Xcode 26.3-era source needs. Fixing that needs an App Store / Xcode update,
-which is not something to do as a side effect of a render-timing test.
+**Fixed as a proper two-tier design:**
+- Per-shot encode (`shots.py`) now pins an explicit high-bitrate
+  intermediate (`-b:v 20M`) instead of relying on `h264_videotoolbox`'s
+  default, which is what had quietly produced the ~14.4 Mbps figure above —
+  not a documented guarantee, just whatever that encoder version defaults to.
+- `concat.mp4` is still a `-c copy` stitch of those intermediates — no
+  quality lost, nearly free, kept in `work/` for inspection.
+- Exactly one delivery encode (`compose.deliver()`) does everything else in
+  a single pass: mux the narration WAV, convert
+  `scale=in_range=full:out_range=tv,format=yuv420p` (JPEG-sourced frames
+  decode full-range; without this the output stays tagged `yuvj420p` and
+  shifts levels on upload), encode with `h264_videotoolbox` at `-b:v 10M`,
+  explicit `bt709` color tags, AAC at 192k/48kHz, and `-movflags
+  +faststart`. Verified: `yuv420p`/`color_range=tv`/`bt709`, ~10.17 Mbps,
+  48kHz AAC, `moov` before `mdat` in the file (faststart confirmed by byte
+  offset). Video/audio duration are probed and logged before the encode
+  (67.80s / 67.85s, 0.05s drift this run) with a warning if they differ by
+  more than 0.2s, since `-shortest` truncates silently past that.
+- Output goes to `output/slice_delivery.mp4` — deliberately not
+  `output/slice.mp4`, so the old stream-copy artifact and the new real
+  encode can't be confused mid-comparison. **This needs to collapse to one
+  canonical output filename before this leaves the experiment stage** —
+  keeping two names around is a debugging convenience, not a design worth
+  carrying into the real pipeline.
 
-Net effect: `output/slice.mp4` exists and plays (1920x1080, h264, AAC audio,
-67.8s) but without burned-in subtitles this run. `work/subs.ass` is still a
-valid, correct stage-2 artifact — the gap is entirely in stage 4's ability
-to render it, and it's an environment problem with a known fix, not an
-unknown one.
+**Subtitle burn-in is now working, but required an environment fix, not a
+code fix.** Homebrew's regular `ffmpeg` formula ships with neither `libass`
+nor `freetype` compiled in — confirmed directly, `ffmpeg -filters` only
+matches `bass` (the audio filter), not `ass`. The full-featured build is
+`ffmpeg-full`, from the `homebrew-ffmpeg/ffmpeg` tap, which does have
+`libass`/`freetype`/`fontconfig` (`--enable-libass --enable-libfreetype
+--enable-libfontconfig` in its build config) — but it's **keg-only**, so
+even after installing it, plain `ffmpeg` on `PATH` still silently resolves
+to the homebrew-core build. There's also a third candidate ffmpeg binary on
+this machine, at `~/miniconda3/bin/ffmpeg` — enough ambiguity that trusting
+`PATH` at all was a real risk of silent wrong-binary substitution, not a
+hypothetical one.
 
-(Also worth noting for later: uninstalling the old `ffmpeg` formula to try
-the tap version auto-removed 12 "unneeded" dependent formulae, including
-`python@3.11` — unrelated to this project's Python, which is uv-managed and
-untouched, but worth knowing if something *else* on this machine was quietly
-relying on that system Python.)
+Fixed with `ffmpeg_config.py`: `FFMPEG_BIN`/`FFPROBE_BIN` default to
+`ffmpeg-full`'s keg-only path
+(`/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg{,probe}`), overridable via
+environment variable, and every subprocess call in `shots.py`/`compose.py`
+goes through them — no bare `"ffmpeg"`/`"ffprobe"` string anywhere in
+either file. `resolve_and_log()` runs at the start of both `shots.run()`
+and `compose.run()`, printing the resolved binary path, its version, and
+whether the `ass` filter is present, so binary identity is visible in every
+run's output rather than assumed. `burn_subs` was already a detected
+capability before this (`deliver()` never hardcoded `False`) — with
+`ffmpeg-full` pinned, it now resolves `True`, and subtitles burn in with no
+code changes.
+
+Verified visually, not just via ffprobe: extracted the frame at 8s from
+`output/slice_delivery.mp4` and confirmed "his wife Cäzilia," is burned in,
+bottom-centered with outline, matching stage 2's `[V4+ Styles]` block —
+including the `ä` rendering correctly (fontconfig resolving a real glyph,
+not a tofu box).
+
+This was an environment prerequisite for stage 4/5, not a code defect: the
+code path for burn-in was correct the whole time, it simply had no working
+`ass` filter to call until a full-featured ffmpeg build was pinned by
+explicit path.
+
+(Also worth noting for later: uninstalling the old `ffmpeg` formula while
+troubleshooting this auto-removed 12 "unneeded" dependent formulae,
+including `python@3.11` — unrelated to this project's Python, which is
+uv-managed and untouched, but worth knowing if something *else* on this
+machine was quietly relying on that system Python.)
 
 ## Stage 5 (`run.py`) — timing table
 
@@ -174,35 +231,65 @@ network call, and re-hitting it just to reproduce a number already measured
 That figure is carried in as a labeled constant. Everything else below is a
 live measurement from this run.
 
+Peak RSS is now logged per row, not just once at the end — a number near the
+8GB ceiling on any single step would invalidate that step's timing (thrashing
+counted as "work"). Two different things feed it: `shots:encode` and
+`compose:concat`/`compose:deliver` get an exact peak RSS for that one ffmpeg
+process via `/usr/bin/time -l`; `align` and `shots:prep` run in-process, so
+they get `resource.getrusage(RUSAGE_SELF).ru_maxrss` instead, which is a
+*cumulative* high-water mark for the whole Python process (monotonic, never
+decreases) rather than an isolated per-step figure — labeled as such rather
+than passed off as something more precise than it is.
+
+Shot 1's encode is split from shots 2–3's steady-state average in the
+extrapolation. Shot 1 pays `ffmpeg`'s filter-graph init and a cold page
+cache that the later shots don't; folding it into a flat per-shot average
+and multiplying by an extrapolated shot count overstates the real cost. The
+20-minute estimate below uses shot 1's actual cost once (a fixed, one-time
+overhead) plus the steady-state per-output-second rate for the rest.
+
 ```
-stage                      seconds   per output minute
-narrate (azure, recorded)       1.5                 1.3
-align                          4.1                 3.6
-shots:prep shot1               0.4                 0.3
-shots:encode shot1            18.6                16.4
-shots:prep shot2               0.5                 0.5
-shots:encode shot2            18.3                16.2
-shots:prep shot3               0.2                 0.2
-shots:encode shot3            18.5                16.3
-compose:concat                 0.4                 0.3
-compose:mux (no burn)          0.6                 0.5
-------------------------------------------------------
-total                         63.0                55.7
+ffmpeg binary : /opt/homebrew/opt/ffmpeg-full/bin/ffmpeg
+ffprobe binary: /opt/homebrew/opt/ffmpeg-full/bin/ffprobe
+version       : ffmpeg version 8.1.2 Copyright (c) 2000-2026 the FFmpeg developers
+ass filter    : present
 
-extrapolated to a 20-minute episode: 18.6 minutes
+(peak RSS: align/shots:prep = cumulative process high-water mark; shots:encode/compose = exact per-call, via /usr/bin/time -l)
+stage                                   seconds  per out. min  peak RSS MB
+narrate (azure, recorded)                   1.5           1.3          n/a
+align                                       3.9           3.5          594
+shots:prep shot1                            0.4           0.3          594
+shots:prep shot2                            0.5           0.5          594
+shots:prep shot3                            0.2           0.2          594
+shots:encode shot1 (cold start)            18.6          16.4          274
+shots:encode shot2                         17.9          15.8          305
+shots:encode shot3                         17.9          15.9          301
+shots:encode steady-state avg (n=2)        17.9          15.8          n/a  (info only)
+compose:concat                              0.4           0.4           33
+compose:deliver (burned)                   11.0           9.8         1140
+--------------------------------------------------------------------------
+total                                      72.4          64.0
 
-peak memory -- this process (PIL decode/prep): 697 MB, child processes (ffmpeg/whisper): 296 MB
+extrapolated to a 20-minute episode: 21.2 minutes (uses shots 2..N steady-state rate, not shot 1's cold-start cost)
+
+peak RSS across all child processes this run (cumulative high-water mark, not per-step): 1140 MB
 ```
 
-18.6 minutes to render 20 minutes of output is a workable ratio for "several
-videos a week" on this hardware — with two caveats. First, this is an upper
-bound: these three source images (up to ~30MB, 36MP) are far larger than
-typical archival material, chosen specifically to stress the render path;
-real Hinterkaifeck-scale sources would cost less to encode, not more.
-Second, subtitle burn-in isn't in this number at all (see stage 4) — once
-that's unblocked, the extrapolation needs redoing with the real burn-in cost
-included, which will not be free (it's a full decode+encode pass over 20
-minutes of 1080p video).
+This is the first fully real number: 21.2 minutes to render 20 minutes of
+output, subtitle burn-in included this time (the previous 18.6/21.1-minute
+figures in earlier drafts of this file did not — that gap is now closed).
+The delivery encode's cost barely moved with burn-in on (11.0s either way,
+same 1.1GB-ish peak RSS) — burning the ASS overlay is cheap relative to the
+decode+filter+encode pass it's already riding on, which answers the open
+question from the previous revision of this section. Same caveats as
+before still apply: this is an upper bound (stress-test images, not
+real archival-scale sources), and `output/slice_delivery.mp4` is still a
+temporary name that needs to collapse to one canonical output filename
+before this leaves the experiment stage. The single delivery encode
+(`compose:deliver`, ~1.1GB peak RSS, ~11s for 67.8s of 1080p) is the
+largest single memory consumer in the whole run — still well under the 8GB
+ceiling here, but worth tracking as episode length grows, since it
+processes the entire video in one pass rather than per-shot chunks.
 
 ## Product-level finding: archival photo resolution is a real ceiling, not a test artifact
 

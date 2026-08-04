@@ -1,17 +1,20 @@
-stage                      seconds   per output minute
-narrate (azure, recorded)       1.5                 1.3
-align                          4.1                 3.6
-shots:prep shot1               0.4                 0.3
-shots:encode shot1            18.6                16.4
-shots:prep shot2               0.5                 0.5
-shots:encode shot2            18.3                16.2
-shots:prep shot3               0.2                 0.2
-shots:encode shot3            18.5                16.3
-compose:concat                 0.4                 0.3
-compose:mux (no burn)          0.6                 0.5
-------------------------------------------------------
-total                         63.0                55.7
+(peak RSS: align/shots:prep = cumulative process high-water mark; shots:encode/compose = exact per-call, via /usr/bin/time -l)
+stage                                   seconds  per out. min  peak RSS MB
+narrate (azure, recorded)                   1.5           1.3          n/a
+align                                       3.9           3.5          594
+shots:prep shot1                            0.4           0.3          594
+shots:prep shot2                            0.5           0.5          594
+shots:prep shot3                            0.2           0.2          594
+shots:encode shot1 (cold start)            18.6          16.4          274
+shots:encode shot2                         17.9          15.8          305
+shots:encode shot3                         17.9          15.9          301
+shots:encode steady-state avg (n=2)        17.9          15.8          n/a  (info only)
+compose:concat                              0.4           0.4           33
+compose:deliver (burned)                   11.0           9.8         1140
+--------------------------------------------------------------------------
+total                                      72.4          64.0
 
-extrapolated to a 20-minute episode: 18.6 minutes
+extrapolated to a 20-minute episode: 21.2 minutes (uses shots 2..N steady-state rate, not shot 1's cold-start cost -- see below)
 
-peak memory -- this process (PIL decode/prep): 697 MB, child processes (ffmpeg/whisper): 296 MB
+peak RSS across all child processes this run (cumulative high-water mark, not per-step -- see per-row figures above for that): 1140 MB
+subtitles burned into the delivery encode via FFMPEG_BIN's ass filter.

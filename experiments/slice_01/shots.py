@@ -22,6 +22,8 @@ episode:
     source.
 """
 
+import re
+import resource
 import subprocess
 import sys
 import time
@@ -29,6 +31,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image, ImageOps
+
+from ffmpeg_config import FFMPEG_BIN, resolve_and_log
 
 ROOT = Path(__file__).parent
 PROJECT_ROOT = ROOT.parent.parent
@@ -49,6 +53,12 @@ PREP_HEIGHT = OUTPUT_HEIGHT * 2  # "~2x the output frame height" per instruction
 ZOOMPAN_UPSCALE = 4  # scale=iw*4:ih*4 before zoompan -- see SLICE-SPEC's stepping note
 ZOOM_END = 1.3
 
+# High-bitrate intermediate: concat later uses -c copy, so whatever quality
+# this encode bakes in is what the delivery encode has to work with. Pinned
+# explicitly rather than left to h264_videotoolbox's default so it isn't
+# quietly dependent on ffmpeg-version heuristics.
+INTERMEDIATE_BITRATE = "20M"
+
 
 @dataclass
 class ShotTiming:
@@ -58,8 +68,19 @@ class ShotTiming:
     clip: Path
     duration: float
     prep_seconds: float
+    prep_peak_rss: int  # bytes, cumulative process high-water mark (see run_timed note)
     encode_seconds: float
     encode_fps: float
+    encode_peak_rss: int  # bytes, this ffmpeg call only
+
+
+def run_timed(cmd: list[str]) -> tuple[subprocess.CompletedProcess, int]:
+    """Run cmd, capturing its exact peak RSS in bytes via `/usr/bin/time -l`
+    (macOS reports bytes here, not the KB that Linux's `time -v` would)."""
+    result = subprocess.run(["/usr/bin/time", "-l", *cmd], capture_output=True, text=True)
+    match = re.search(r"^\s*(\d+)\s+maximum resident set size", result.stderr, re.MULTILINE)
+    peak_rss = int(match.group(1)) if match else 0
+    return result, peak_rss
 
 
 def find_images() -> list[Path]:
@@ -109,8 +130,16 @@ def print_fitness_report(shot_number: int, path: Path, report: FitnessReport) ->
         print(f"  note: {note}")
 
 
-def prep_image(index: int, path: Path) -> tuple[Path, float, tuple[int, int]]:
-    """Decode, fix EXIF orientation, downscale. Returns (prepped_path, elapsed, original_size)."""
+def prep_image(index: int, path: Path) -> tuple[Path, float, int, tuple[int, int]]:
+    """Decode, fix EXIF orientation, downscale.
+
+    Returns (prepped_path, elapsed, peak_rss, original_size). peak_rss is
+    RUSAGE_SELF.ru_maxrss sampled right after this call -- a cumulative
+    high-water mark for the whole process (whisper's model from stage 2
+    included, if this is running inside run.py), not an isolated
+    per-call figure. It still answers the question that matters here: how
+    close is this process to the 8GB ceiling at this point in the run.
+    """
     start = time.perf_counter()
 
     decodable_path, decode_path_kind = ensure_decodable(path)
@@ -131,13 +160,15 @@ def prep_image(index: int, path: Path) -> tuple[Path, float, tuple[int, int]]:
         im.save(out_path, quality=92)
 
     elapsed = time.perf_counter() - start
+    peak_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     if decode_path_kind == "sips-converted":
         print(f"  ({path.name}: converted from HEIC via sips before PIL could open it)")
-    return out_path, elapsed, original_size
+    return out_path, elapsed, peak_rss, original_size
 
 
-def encode_shot(index: int, prepped: Path, duration: float) -> tuple[Path, float, float]:
-    """zoompan Ken Burns push-in + h264_videotoolbox. Returns (clip_path, elapsed, encode_fps)."""
+def encode_shot(index: int, prepped: Path, duration: float) -> tuple[Path, float, float, int]:
+    """zoompan Ken Burns push-in + h264_videotoolbox at a pinned high-bitrate
+    intermediate quality. Returns (clip_path, elapsed, encode_fps, peak_rss)."""
     frames = max(round(duration * FPS), 1)
     zoom_increment = (ZOOM_END - 1.0) / frames
     out_path = WORK_DIR / f"shot{index}.mp4"
@@ -149,17 +180,18 @@ def encode_shot(index: int, prepped: Path, duration: float) -> tuple[Path, float
     )
 
     cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-v", "warning",
+        FFMPEG_BIN, "-y", "-hide_banner", "-v", "warning",
         "-loop", "1", "-i", str(prepped),
         "-vf", vf,
         "-frames:v", str(frames),
         "-c:v", "h264_videotoolbox",
+        "-b:v", INTERMEDIATE_BITRATE,
         "-pix_fmt", "yuv420p",
         str(out_path),
     ]
 
     start = time.perf_counter()
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result, peak_rss = run_timed(cmd)
     elapsed = time.perf_counter() - start
 
     if result.returncode != 0:
@@ -171,7 +203,7 @@ def encode_shot(index: int, prepped: Path, duration: float) -> tuple[Path, float
             print(f"  ffmpeg warning on shot{index}: {line}")
 
     encode_fps = frames / elapsed if elapsed > 0 else 0.0
-    return out_path, elapsed, encode_fps
+    return out_path, elapsed, encode_fps, peak_rss
 
 
 def narration_duration() -> float:
@@ -183,6 +215,7 @@ def narration_duration() -> float:
 
 
 def run() -> list[ShotTiming]:
+    resolve_and_log()
     WORK_DIR.mkdir(exist_ok=True)
     images = find_images()
     if not images:
@@ -198,18 +231,21 @@ def run() -> list[ShotTiming]:
 
     timings: list[ShotTiming] = []
     for i, path in enumerate(images, start=1):
-        prepped, prep_seconds, original_size = prep_image(i, path)
+        prepped, prep_seconds, prep_peak_rss, original_size = prep_image(i, path)
         report = assess_image(path, *original_size)
         print_fitness_report(i, path, report)
         print(
             f"  prepped: {original_size[0]}x{original_size[1]} -> "
-            f"{Image.open(prepped).size} in {prep_seconds:.2f}s"
+            f"{Image.open(prepped).size} in {prep_seconds:.2f}s "
+            f"(process RSS so far: {prep_peak_rss / 1e6:.0f}MB)"
         )
 
-        clip, encode_seconds, encode_fps = encode_shot(i, prepped, per_shot_duration)
+        clip, encode_seconds, encode_fps, encode_peak_rss = encode_shot(
+            i, prepped, per_shot_duration
+        )
         print(
             f"  encoded: {clip.relative_to(ROOT)} in {encode_seconds:.2f}s "
-            f"({encode_fps:.0f} fps, h264_videotoolbox)\n"
+            f"({encode_fps:.0f} fps, h264_videotoolbox, peak RSS {encode_peak_rss / 1e6:.0f}MB)\n"
         )
 
         timings.append(
@@ -220,8 +256,10 @@ def run() -> list[ShotTiming]:
                 clip=clip,
                 duration=per_shot_duration,
                 prep_seconds=prep_seconds,
+                prep_peak_rss=prep_peak_rss,
                 encode_seconds=encode_seconds,
                 encode_fps=encode_fps,
+                encode_peak_rss=encode_peak_rss,
             )
         )
 

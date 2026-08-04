@@ -3,30 +3,37 @@
 Throwaway code for experiments/slice_01 -- see docs/SLICE-SPEC.md and
 FINDINGS.md. Not imported by anything, not meant to last.
 
-Two ffmpeg passes, not one, because they have different re-encode costs:
+Two-tier design:
 1. Concat the shot clips with the concat demuxer and `-c copy` -- no
-   re-encoding, just container-level stitching, so this is nearly free.
-2. Attach the narration and burn in subtitles with the `ass` filter. Burning
-   subtitles means decoding and re-encoding the video no matter what, so
-   this pass is where the real cost is, not the concat.
+   re-encoding, just container-level stitching. Each shot clip is already a
+   pinned high-bitrate intermediate (see shots.py), so this step doesn't
+   soften anything; it's nearly free either way.
+2. Exactly one delivery encode: mux the narration audio in, burn subtitles
+   in if the `ass` filter is available, convert to limited-range yuv420p
+   (JPEG-sourced frames decode full-range, which shifts levels on upload if
+   it isn't corrected), and encode once at delivery bitrate with
+   h264_videotoolbox.
+
+Subtitle burn-in is a detected capability (`ffmpeg_config.resolve_and_log()`
+checks for the `ass` filter fresh every run), not a hardcoded decision --
+the moment libass is present in FFMPEG_BIN, this same code path burns
+subs.ass with no changes needed. See FINDINGS.md: plain
+"ffmpeg" resolves to homebrew-core's build (no libass); ffmpeg-full has it
+but is keg-only, so FFMPEG_BIN/FFPROBE_BIN in ffmpeg_config.py pin the
+explicit path rather than trusting PATH -- there's also a conda ffmpeg on
+this machine, so silent binary substitution is a real risk, not a
+hypothetical one.
 
 Subtitles are burned in, not muxed as a soft track -- platforms handle soft
 subs inconsistently and we want to see exactly what the viewer sees.
-
-NOT DONE THIS RUN: the installed ffmpeg (homebrew-core's regular `ffmpeg`
-formula) has neither the `ass` filter (needs libass) nor `drawtext` (needs
-freetype) -- it's a stripped-down build. The full-featured build lives in
-the `homebrew-ffmpeg/ffmpeg` tap, but its bottle isn't available for this
-OS version, so installing it means compiling from source, which this
-machine's Xcode Command Line Tools are too outdated to do -- that needs an
-App Store update, not something to do as a side effect of a render-timing
-test. See FINDINGS.md. work/subs.ass is still the valid stage-2 artifact;
-this stage just doesn't burn it in yet.
 """
 
+import re
 import subprocess
 import time
 from pathlib import Path
+
+from ffmpeg_config import FFMPEG_BIN, FFPROBE_BIN, resolve_and_log
 
 ROOT = Path(__file__).parent
 WORK_DIR = ROOT / "work"
@@ -35,7 +42,24 @@ NARRATION_PATH = WORK_DIR / "narration_azure_en-US-AriaNeural.wav"
 SUBS_PATH = WORK_DIR / "subs.ass"
 CONCAT_LIST_PATH = WORK_DIR / "concat_list.txt"
 CONCAT_PATH = WORK_DIR / "concat.mp4"
-FINAL_PATH = OUTPUT_DIR / "slice.mp4"
+
+# Deliberately not output/slice.mp4 -- this is the new two-tier delivery
+# path and the old name shouldn't be silently overwritten mid-comparison.
+# Should collapse to one canonical output name before this leaves the
+# experiment stage -- see FINDINGS.md.
+DELIVERY_PATH = OUTPUT_DIR / "slice_delivery.mp4"
+
+DELIVERY_BITRATE = "10M"
+DURATION_DRIFT_TOLERANCE = 0.2  # seconds -- -shortest silently truncates past this
+
+
+def run_timed(cmd: list[str]) -> tuple[subprocess.CompletedProcess, int]:
+    """Run cmd, capturing its exact peak RSS in bytes via `/usr/bin/time -l`
+    (macOS reports bytes here, not the KB that Linux's `time -v` would)."""
+    result = subprocess.run(["/usr/bin/time", "-l", *cmd], capture_output=True, text=True)
+    match = re.search(r"^\s*(\d+)\s+maximum resident set size", result.stderr, re.MULTILINE)
+    peak_rss = int(match.group(1)) if match else 0
+    return result, peak_rss
 
 
 def find_shot_clips() -> list[Path]:
@@ -48,29 +72,38 @@ def find_shot_clips() -> list[Path]:
     return clips
 
 
-def concat_clips(clips: list[Path]) -> float:
+def concat_clips(clips: list[Path]) -> tuple[float, int]:
     CONCAT_LIST_PATH.write_text("".join(f"file '{p.resolve()}'\n" for p in clips))
 
     cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-v", "warning",
+        FFMPEG_BIN, "-y", "-hide_banner", "-v", "warning",
         "-f", "concat", "-safe", "0", "-i", str(CONCAT_LIST_PATH),
         "-c", "copy",
         str(CONCAT_PATH),
     ]
     start = time.perf_counter()
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result, peak_rss = run_timed(cmd)
     elapsed = time.perf_counter() - start
 
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg concat failed:\n{result.stderr}")
-    return elapsed
+    return elapsed, peak_rss
 
 
-def mux(burn_subs: bool) -> tuple[float, bool]:
-    """Attach narration audio. Burns subtitles via the `ass` filter if it's
-    available in this ffmpeg build; otherwise falls back to a plain stream
-    copy and reports that subtitles were not burned in -- see module
-    docstring."""
+def probe_duration(path: Path) -> float:
+    result = subprocess.run(
+        [
+            FFPROBE_BIN, "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ],
+        capture_output=True, text=True, check=True,
+    )
+    return float(result.stdout.strip())
+
+
+def deliver(burn_subs: bool) -> dict:
     if not NARRATION_PATH.exists():
         raise FileNotFoundError(f"{NARRATION_PATH} not found -- run narrate.py first.")
     if not SUBS_PATH.exists():
@@ -78,60 +111,95 @@ def mux(burn_subs: bool) -> tuple[float, bool]:
 
     OUTPUT_DIR.mkdir(exist_ok=True)
 
+    video_duration = probe_duration(CONCAT_PATH)
+    audio_duration = probe_duration(NARRATION_PATH)
+    drift = abs(video_duration - audio_duration)
+    print(f"  video duration {video_duration:.2f}s, audio duration {audio_duration:.2f}s (drift {drift:.2f}s)")
+    if drift > DURATION_DRIFT_TOLERANCE:
+        print(
+            f"  WARNING: video/audio duration differ by {drift:.2f}s, over the "
+            f"{DURATION_DRIFT_TOLERANCE}s tolerance -- -shortest will silently "
+            "truncate whichever is longer."
+        )
+
+    # JPEG-sourced frames decode as full-range; without an explicit
+    # conversion ffmpeg tags the output yuvj420p (full range), which shifts
+    # levels on platforms that assume standard limited-range yuv420p.
+    range_fix = "scale=in_range=full:out_range=tv,format=yuv420p"
     if burn_subs:
         ass_path = str(SUBS_PATH.resolve()).replace("\\", "/").replace(":", "\\:")
-        video_args = ["-vf", f"ass={ass_path}", "-c:v", "h264_videotoolbox", "-pix_fmt", "yuv420p"]
+        vf = f"ass={ass_path},{range_fix}"
     else:
-        video_args = ["-c:v", "copy"]
+        vf = range_fix
 
     cmd = [
-        "ffmpeg", "-y", "-hide_banner", "-v", "warning",
+        FFMPEG_BIN, "-y", "-hide_banner", "-v", "warning",
         "-i", str(CONCAT_PATH),
         "-i", str(NARRATION_PATH),
-        *video_args,
+        "-vf", vf,
         "-map", "0:v:0", "-map", "1:a:0",
-        "-c:a", "aac",
+        "-c:v", "h264_videotoolbox", "-b:v", DELIVERY_BITRATE,
+        "-pix_fmt", "yuv420p", "-color_range", "tv",
+        "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
+        "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+        "-movflags", "+faststart",
         "-shortest",
-        str(FINAL_PATH),
+        str(DELIVERY_PATH),
     ]
     start = time.perf_counter()
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result, peak_rss = run_timed(cmd)
     elapsed = time.perf_counter() - start
 
     if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg mux failed:\n{result.stderr}")
+        raise RuntimeError(f"ffmpeg delivery encode failed:\n{result.stderr}")
 
     for line in result.stderr.splitlines():
         lowered = line.lower()
-        if "fallback" in lowered or "not support" in lowered or "error" in lowered:
+        if "fallback" in lowered or "not support" in lowered:
             print(f"  ffmpeg warning: {line}")
 
-    return elapsed, burn_subs
+    return {
+        "seconds": elapsed,
+        "peak_rss": peak_rss,
+        "burned": burn_subs,
+        "video_duration": video_duration,
+        "audio_duration": audio_duration,
+        "duration_drift": drift,
+    }
 
 
-def ass_filter_available() -> bool:
-    result = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True
-    )
-    return " ass " in result.stdout
-
-
-def run() -> dict[str, float | bool]:
+def run() -> dict:
+    can_burn = resolve_and_log()
     clips = find_shot_clips()
-    concat_seconds = concat_clips(clips)
-    print(f"concat ({len(clips)} clips, -c copy): {concat_seconds:.2f}s -> {CONCAT_PATH.relative_to(ROOT)}")
+    concat_seconds, concat_peak_rss = concat_clips(clips)
+    print(
+        f"concat ({len(clips)} clips, -c copy): {concat_seconds:.2f}s, "
+        f"peak RSS {concat_peak_rss / 1e6:.0f}MB -> {CONCAT_PATH.relative_to(ROOT)}"
+    )
 
-    can_burn = ass_filter_available()
-    if not can_burn:
+    if can_burn:
+        print("  ass filter available -- burning subs.ass into the delivery encode.")
+    else:
         print(
-            "  this ffmpeg build has no `ass` filter (no libass) and no `drawtext` "
-            "(no freetype) -- muxing audio without burning subtitles. See FINDINGS.md."
+            "  ass filter unavailable in FFMPEG_BIN -- delivery encode proceeds "
+            "without subtitle burn-in. This is a blocking stage-4 gap, not a design "
+            "choice -- see FINDINGS.md."
         )
-    mux_seconds, burned = mux(burn_subs=can_burn)
-    label = "mux + subtitle burn-in" if burned else "mux (subtitles NOT burned -- see above)"
-    print(f"{label}: {mux_seconds:.2f}s -> {FINAL_PATH.relative_to(ROOT)}")
 
-    return {"concat": concat_seconds, "mux": mux_seconds, "burned": burned}
+    delivery = deliver(burn_subs=can_burn)
+    label = "deliver (burned)" if delivery["burned"] else "deliver (NOT burned -- libass unavailable)"
+    print(
+        f"{label}: {delivery['seconds']:.2f}s, peak RSS {delivery['peak_rss'] / 1e6:.0f}MB "
+        f"-> {DELIVERY_PATH.relative_to(ROOT)}"
+    )
+
+    return {
+        "concat_seconds": concat_seconds,
+        "concat_peak_rss": concat_peak_rss,
+        "deliver_seconds": delivery["seconds"],
+        "deliver_peak_rss": delivery["peak_rss"],
+        "burned": delivery["burned"],
+    }
 
 
 def main() -> None:
