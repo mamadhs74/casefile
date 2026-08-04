@@ -61,7 +61,7 @@ def rss_mb(row: Row) -> str:
     return f"{row.peak_rss / 1e6:.0f}" if row.peak_rss is not None else "n/a"
 
 
-NAME_WIDTH = 38
+NAME_WIDTH = 44
 
 
 def format_table(rows: list[Row], total_output_seconds: float, extrapolated_minutes: float) -> str:
@@ -139,8 +139,10 @@ def main() -> None:
         rows.append(Row(f"shots:prep shot{st.index}", st.prep_seconds, st.prep_peak_rss))
         fixed_rows_seconds += st.prep_seconds
     for st in shot_timings:
-        cold_marker = " (cold start)" if st.index == shot_timings[0].index else ""
-        rows.append(Row(f"shots:encode shot{st.index}{cold_marker}", st.encode_seconds, st.encode_peak_rss))
+        cold_marker = ", cold start" if st.index == shot_timings[0].index else ""
+        rows.append(
+            Row(f"shots:encode shot{st.index} ({st.treatment}{cold_marker})", st.encode_seconds, st.encode_peak_rss)
+        )
     steady_avg_seconds = mean(st.encode_seconds for st in shot_timings[1:]) if len(shot_timings) > 1 else shot_timings[0].encode_seconds
     rows.append(
         Row(

@@ -3,25 +3,33 @@
 Throwaway code for experiments/slice_01 -- see docs/SLICE-SPEC.md and
 FINDINGS.md. Not imported by anything, not meant to last.
 
-The three source images for this run are a deliberate stress test, not
-picked for documentary content: full-res phone/camera shots (up to ~30MB,
-~36MP) chosen specifically because the *real* Hinterkaifeck archival photos
-are ~1000px and can't support a zoom push at all -- see FINDINGS.md. That's
-a fact about a hundred-year-old negative, not something this test can fix,
-so it can't be used to measure zoom/encode cost. These oversized images can.
+INPUT_DIR (overridable via SHOTS_INPUT_DIR) points at either of two source
+sets, and the encode path taken depends on what fitness.py says about each
+image:
+  - input/: a deliberate stress test, not documentary content -- full-res
+    phone/camera shots (up to ~30MB, ~36MP) picked to measure zoom/encode
+    cost at all, because real archival photos can't. These get the
+    zoompan push.
+  - input_archival/: the real Hinterkaifeck-era images, ~1000px. fitness.py
+    correctly reports no motion type is safe for these -- see FINDINGS.md's
+    product-level finding. These get a static, blurred-fill treatment
+    instead of a zoompan push (see encode_shot_static()).
 
 Two costs are measured separately per shot, because they come from
 different places and don't scale the same way against a real 20-minute
 episode:
-  - prep: PIL decode + EXIF-orientation fix + downscale to ~2x the output
-    frame height. Feeding a 30MB source straight into ffmpeg's zoompan
-    (which upscales 4x internally to avoid integer-rounding stepping on
-    slow zooms) would multiply that cost by 16x for no visual benefit --
-    see docs/SLICE-SPEC.md's zoompan note.
-  - encode: ffmpeg zoompan + h264_videotoolbox, on the already-downscaled
-    source.
+  - prep: PIL decode + EXIF-orientation fix + downscale to PREP_SCALE_FACTOR
+    times the output frame height (see that constant's comment for why the
+    factor is tied to ZOOM_END). Feeding a 30MB source straight into
+    ffmpeg's zoompan (which upscales 4x internally to avoid integer-
+    rounding stepping on slow zooms) would multiply that cost for no visual
+    benefit -- see docs/SLICE-SPEC.md's zoompan note.
+  - encode: ffmpeg zoompan + h264_videotoolbox on the already-downscaled
+    source (or the static/blurred-fill path -- see above), at a pinned
+    high-bitrate intermediate quality.
 """
 
+import os
 import re
 import resource
 import subprocess
@@ -39,8 +47,12 @@ PROJECT_ROOT = ROOT.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from packages.archive.fitness import FitnessReport, assess_fitness  # noqa: E402
+from packages.domain.enums import MotionType  # noqa: E402
 
-INPUT_DIR = ROOT / "input"
+# Overridable so the same script can measure the deliberate oversized-stock-photo
+# stress test (input/) and the real archival-scale sources (input_archival/) as
+# two separate, comparable runs -- see FINDINGS.md's A/B test section.
+INPUT_DIR = Path(os.environ.get("SHOTS_INPUT_DIR", str(ROOT / "input")))
 WORK_DIR = ROOT / "work"
 NARRATION_PATH = WORK_DIR / "narration_azure_en-US-AriaNeural.wav"
 
@@ -49,9 +61,28 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".tiff", ".bmp", ".gif", "
 OUTPUT_WIDTH = 1920
 OUTPUT_HEIGHT = 1080
 FPS = 30
-PREP_HEIGHT = OUTPUT_HEIGHT * 2  # "~2x the output frame height" per instructions
 ZOOMPAN_UPSCALE = 4  # scale=iw*4:ih*4 before zoompan -- see SLICE-SPEC's stepping note
 ZOOM_END = 1.3
+
+# Prep scale is tied to ZOOM_END, not an independent knob: at the tightest
+# zoom, the frame we're actually showing is prep_height / ZOOM_END tall, and
+# that needs to stay >= OUTPUT_HEIGHT or the last frame of the push is an
+# upscale, not a downscale. PREP_SCALE_FACTOR must be >= ZOOM_END with some
+# margin -- 1.4 against a 1.3x zoom keeps every frame in the push at native
+# resolution or better (measured, see FINDINGS.md's A/B test: no visible
+# softening down to 1.2x on this content, but 1.2x's last frame is a genuine
+# slight upscale -- 1.4x has margin, 1.2x doesn't).
+# If ZOOM_END ever changes, this needs recomputing against it, not left as-is.
+PREP_SCALE_FACTOR = 1.4
+PREP_HEIGHT = round(OUTPUT_HEIGHT * PREP_SCALE_FACTOR)
+
+# Fallback treatment for sources fitness.py says no motion type is safe for
+# (below BASE_LONG_EDGE_PX -- real archival photos are frequently this small,
+# see FINDINGS.md's product-level finding). Held static, composited over a
+# blurred cover-scaled copy of itself so the frame fills 16:9 without
+# upscaling the sharp foreground content as aggressively as a direct full-
+# bleed scale would.
+STATIC_BLUR_SIGMA = 20
 
 # High-bitrate intermediate: concat later uses -c copy, so whatever quality
 # this encode bakes in is what the delivery encode has to work with. Pinned
@@ -72,6 +103,7 @@ class ShotTiming:
     encode_seconds: float
     encode_fps: float
     encode_peak_rss: int  # bytes, this ffmpeg call only
+    treatment: str  # "zoompan" or "static (blurred-fill)"
 
 
 def run_timed(cmd: list[str]) -> tuple[subprocess.CompletedProcess, int]:
@@ -206,6 +238,50 @@ def encode_shot(index: int, prepped: Path, duration: float) -> tuple[Path, float
     return out_path, elapsed, encode_fps, peak_rss
 
 
+def encode_shot_static(index: int, prepped: Path, duration: float) -> tuple[Path, float, float, int]:
+    """No zoom -- fitness.py says this source doesn't meet the minimum
+    resolution for any motion type. Composited over a blurred, cover-scaled
+    copy of itself (fills 16:9 without a hard edge or letterboxing to flat
+    black) with the actual image scaled to fit on top, held for the shot's
+    duration. Returns (clip_path, elapsed, encode_fps, peak_rss)."""
+    frames = max(round(duration * FPS), 1)
+    out_path = WORK_DIR / f"shot{index}.mp4"
+
+    filter_complex = (
+        f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,"
+        f"crop={OUTPUT_WIDTH}:{OUTPUT_HEIGHT},gblur=sigma={STATIC_BLUR_SIGMA}[bg];"
+        f"[0:v]scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease[fg];"
+        f"[bg][fg]overlay=(W-w)/2:(H-h)/2"
+    )
+
+    cmd = [
+        FFMPEG_BIN, "-y", "-hide_banner", "-v", "warning",
+        "-loop", "1", "-i", str(prepped),
+        "-filter_complex", filter_complex,
+        "-frames:v", str(frames),
+        "-r", str(FPS),
+        "-c:v", "h264_videotoolbox",
+        "-b:v", INTERMEDIATE_BITRATE,
+        "-pix_fmt", "yuv420p",
+        str(out_path),
+    ]
+
+    start = time.perf_counter()
+    result, peak_rss = run_timed(cmd)
+    elapsed = time.perf_counter() - start
+
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg failed on shot{index} (static/blurred-fill):\n{result.stderr}")
+
+    for line in result.stderr.splitlines():
+        lowered = line.lower()
+        if "fallback" in lowered or "not support" in lowered or "error" in lowered:
+            print(f"  ffmpeg warning on shot{index}: {line}")
+
+    encode_fps = frames / elapsed if elapsed > 0 else 0.0
+    return out_path, elapsed, encode_fps, peak_rss
+
+
 def narration_duration() -> float:
     import soundfile as sf
 
@@ -240,11 +316,19 @@ def run() -> list[ShotTiming]:
             f"(process RSS so far: {prep_peak_rss / 1e6:.0f}MB)"
         )
 
-        clip, encode_seconds, encode_fps, encode_peak_rss = encode_shot(
-            i, prepped, per_shot_duration
-        )
+        if MotionType.ZOOM_IN in report.allowed_motion_types:
+            treatment = "zoompan"
+            clip, encode_seconds, encode_fps, encode_peak_rss = encode_shot(
+                i, prepped, per_shot_duration
+            )
+        else:
+            treatment = "static"
+            print("  motion: NONE allowed by fitness.py -- static + blurred-fill instead of zoompan")
+            clip, encode_seconds, encode_fps, encode_peak_rss = encode_shot_static(
+                i, prepped, per_shot_duration
+            )
         print(
-            f"  encoded: {clip.relative_to(ROOT)} in {encode_seconds:.2f}s "
+            f"  encoded ({treatment}): {clip.relative_to(ROOT)} in {encode_seconds:.2f}s "
             f"({encode_fps:.0f} fps, h264_videotoolbox, peak RSS {encode_peak_rss / 1e6:.0f}MB)\n"
         )
 
@@ -260,6 +344,7 @@ def run() -> list[ShotTiming]:
                 encode_seconds=encode_seconds,
                 encode_fps=encode_fps,
                 encode_peak_rss=encode_peak_rss,
+                treatment=treatment,
             )
         )
 

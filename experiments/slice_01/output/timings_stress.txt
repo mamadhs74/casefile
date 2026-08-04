@@ -1,0 +1,20 @@
+(peak RSS: align/shots:prep = cumulative process high-water mark; shots:encode/compose = exact per-call, via /usr/bin/time -l)
+stage                                         seconds  per out. min  peak RSS MB
+narrate (azure, recorded)                         1.5           1.3          n/a
+align                                             4.3           3.8          624
+shots:prep shot1                                  0.3           0.3          624
+shots:prep shot2                                  0.5           0.5          624
+shots:prep shot3                                  0.2           0.2          624
+shots:encode shot1 (zoompan, cold start)          9.8           8.7          174
+shots:encode shot2 (zoompan)                      9.7           8.6          171
+shots:encode shot3 (zoompan)                      9.7           8.6          184
+shots:encode steady-state avg (n=2)               9.7           8.6          n/a  (info only)
+compose:concat                                    0.3           0.3           33
+compose:deliver (burned)                         11.0           9.8         1131
+--------------------------------------------------------------------------------
+total                                            47.4          41.9
+
+extrapolated to a 20-minute episode: 14.0 minutes (uses shots 2..N steady-state rate, not shot 1's cold-start cost -- see below)
+
+peak RSS across all child processes this run (cumulative high-water mark, not per-step -- see per-row figures above for that): 1131 MB
+subtitles burned into the delivery encode via FFMPEG_BIN's ass filter.

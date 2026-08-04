@@ -251,15 +251,95 @@ upscale-before-crop step to fix the stepping, at which point it's paying a
 similar cost to zoompan for a similar reason and the whole exercise loses
 its point. Not recommending it; `shots.py` still uses zoompan.
 
-### Recommendation (not applied — `shots.py`'s default prep scale is unchanged)
+### Adopted: `PREP_SCALE_FACTOR = 1.4`
 
-Prep scale factor is the real, validated lever: 2.0x→1.4x cuts
-`shots:encode` from 18.2s to 10.0s/shot (45% less) with no visible quality
-loss on this content; 2.0x→1.2x cuts it to 7.7s (58% less) but starts
-technically upscaling at the tightest zoom, unverified on harder content.
-1.4x looks like the safer default to switch to if/when this stops being
-throwaway code; 1.2x is worth a second look specifically against
-text/document-heavy archival scans before trusting it generally.
+2.0x→1.4x cuts `shots:encode` from 18.2s to 10.0s/shot (45% less) with no
+visible quality loss on this content. 1.2x was rejected as the default
+despite its bigger win (7.7s/shot, 58% less): at zoom=1.3x its last frame
+feeds the output from ~1495px of source, an actual upscale, and the real
+content this pipeline exists for is document/newspaper scans — exactly
+where that shows up first, unlike the soft winter-branch test content here
+that happened to hide it. 1.4x stays at native resolution or better across
+the whole zoom range for these aspect ratios.
+
+Made this a named constant (`PREP_SCALE_FACTOR`, `shots.py`) with a
+comment tying it to `ZOOM_END`, not a bare `1.4` in the prep call: the safe
+value is `effective_source_at_max_zoom = PREP_SCALE_FACTOR / ZOOM_END`,
+which needs to stay ≥ 1.0 for the tightest frame of the push to not be an
+upscale. At `ZOOM_END = 1.3`, `1.4` gives a small margin above the `1.3`
+break-even point; `1.2` sits below it. If the zoom curve ever pushes past
+1.3x, this ratio needs recomputing against the new `ZOOM_END`, not left as
+a leftover magic number.
+
+crop+scale stays rejected (previous section) — `shots.py` still uses
+zoompan, just at the new prep scale.
+
+## Two real timing runs: stress test vs. the actual product case
+
+Everything above used the deliberate oversized-stock-photo stress test.
+That measures an upper bound on encode cost, not what a real episode
+costs — the real Hinterkaifeck-era images are ~1000px, which `fitness.py`
+correctly rejects for any motion type, so `shots.py` was never actually
+exercising the code path a real case would hit. Two gaps closed to make
+this a real second measurement rather than a hypothetical one:
+
+- `shots.py`'s `INPUT_DIR` is now overridable via `SHOTS_INPUT_DIR`, so the
+  same script measures either source set without duplicating code.
+- `shots.py` now actually *acts* on `fitness.py`'s verdict instead of just
+  printing it. When `MotionType.ZOOM_IN` isn't in `allowed_motion_types`,
+  `encode_shot_static()` runs instead of the zoompan push: the source is
+  composited over a blurred, cover-scaled copy of itself (fills 16:9
+  without a hard edge) with the sharp image centered on top at its best
+  fit, held static for the shot's duration. This is the same treatment for
+  "too small for any motion" and "portrait narrower than 1080px" (SLICE-
+  SPEC's `requires_letterbox` case) — one code path handles both, since a
+  blurred-fill background covers either problem.
+
+Downloaded three real Hinterkaifeck-era images from Wikimedia Commons for
+`input_archival/`, verified via the API in an earlier stage of this
+experiment: `Hinterkaifeck-Hof.jpg` (918×716, the farmstead itself, public
+domain — photographer died 1954), `Hinterkaifeck.jpg` (448×932, portrait,
+the victims' memorial stone, CC0), `Photo_-_Hinterkaifeck.jpg` (960×430,
+CC BY-SA 4.0). All three: `meets_minimum_resolution=False`,
+`allowed_motion_types` empty, exactly as expected. The portrait one also
+triggers `requires_letterbox=True`.
+
+### Results (both at `PREP_SCALE_FACTOR = 1.4`, both with subtitle burn-in)
+
+```
+                          stress test (input/)     archival (input_archival/)
+shots:prep (avg)          ~0.35s/shot               ~0.01s/shot
+shots:encode (avg)        9.7s/shot (zoompan)       3.6s/shot (static+blurred-fill)
+compose:deliver           11.0s                     11.1s
+total                     47.4s                     27.7s
+extrapolated (20min)      14.0 minutes              8.1 minutes
+peak RSS (deliver)        1131MB                    1086MB
+```
+
+The archival case is ~40% cheaper end to end than the already-reduced
+stress test, and the `shots:encode` gap is the whole story: static +
+blurred-fill on a already-tiny source is a much smaller job for
+`h264_videotoolbox` than a zoompan push on a 2.4MP prepped frame (3.6s vs
+9.7s/shot). `compose:deliver` cost is essentially unchanged between the two
+(11.0s vs 11.1s) — that stage's cost is driven by output duration and
+resolution, not by what happened upstream, which is the expected and
+correct result.
+
+**8.1 minutes to render a 20-minute episode is the number that actually
+matters for planning** — the 14.0/21.2-minute figures elsewhere in this
+file are upper bounds from a deliberately worst-case source set, not a
+plan. Real cases built from thin archival records (which, per the
+product-level finding below, is most of them) should render meaningfully
+faster than the stress test suggested.
+
+Verified visually: extracted a frame from the portrait memorial-stone shot
+(`work/shot2.mp4`) and confirmed the blurred-fill composite renders
+correctly — sharp stone centered and legible (the actual inscription: "Am
+31. März 1922 fiel... die Familie Gabriel-Gruber... zum Opfer" and the six
+victims' names), blurred/darkened mirror of itself filling the sides, no
+hard edge or flat-black letterboxing. `output/slice_delivery_archival.mp4`
+and `output/timings_archival.txt` kept alongside `_stress` versions of both
+for direct comparison.
 
 ## Stage 4 (`compose.py`) — was video-only-in-effect; now a real two-tier encode
 
