@@ -425,6 +425,15 @@ researcher makes after review — nothing currently blocks that *upgrade* (only 
 *downgrade* away from Tier A while cited by a narratable claim is blocked, per
 `Claim`'s narratable invariant above).
 
+**First real use of this path:** `source_7` (`crimearchives.net`'s transcription of a
+June 20, 1893 Boston Globe article on the Borden verdict) fetched as `UNVERIFIED`, same
+as any other domain the heuristics don't recognize — the automation has no way to know a
+modern site is hosting a faithful transcription of a genuine period newspaper. Promoted
+to `CONTEMPORANEOUS` by direct review of the content, specifically to test the
+claim-extraction prompt against a real contemporaneous source rather than another
+disposable Tier B fixture. The upgrade path existed in the design since the tiering
+section above was written; this is the first time anything actually went through it.
+
 **`Source.text_sha256` is now unique per `(subject_id, text_sha256)`** — a hard DB
 constraint, not just the fetch layer's own pre-check (which exists too, and raises
 `DuplicateSourceContentError` naming the existing row rather than a raw
@@ -612,6 +621,26 @@ feeding the result in as a `Source` some other way than `fetch_source()`), or it
 actually eligible for R1's gate no matter how much retrospective writing exists about
 it. Not a bug to fix in the fetch layer — a criterion missing from how subjects get
 chosen in the first place.
+
+**A third failure mode, distinct from the two above and from the robots.txt bug already
+fixed: material that demonstrably exists online and is indexed, but is walled off by the
+host's own anti-bot infrastructure, not by anything wrong in this codebase.** Investigated
+while looking for a genuine Tier A/contemporaneous test document for the claim-extraction
+prompt (see below): `famous-trials.com` and `lizzieandrewborden.com` — the two sites most
+likely to host verbatim inquest testimony for a real historical case — both sit behind a
+Cloudflare JS challenge; a plain request gets a challenge page, not content, regardless of
+`User-Agent`. `loc.gov` (Chronicling America's current home, after a domain
+consolidation) is worse: a real request with a proper descriptive `User-Agent` gets a
+flat `403` on the article page, the OCR text endpoint, *and* `robots.txt` itself —
+confirmed through the actual fetch layer, not just `curl`. This is not the Wikipedia
+case: that was fixable because the bug was ours (a missing header on our own request).
+This is not fixable the same way, and **this project will not build the workaround** —
+UA spoofing, headless-browser rendering, or any other bot-wall evasion is out of scope on
+purpose, not for lack of a mechanism. Three distinct reasons a real Tier A source can be
+unreachable now exist as documented findings: our own bug (this section, fixed), doesn't
+exist on the open web at all (Hinterkaifeck's German archival records, above), and exists
+but is deliberately gated against exactly this kind of automated access (this paragraph,
+not something to route around).
 
 ---
 
@@ -861,6 +890,92 @@ selected. Recording this explicitly because "we checked for non-determinism and 
 is exactly the kind of claim that gets assumed true later without ever having been
 verified; here it was verified, on this date, on this source, and this is what running
 it twice actually showed.
+
+**Tested against a Tier B/`unverified` HTML source too: uniform `contemporaneous_report`
+is very likely correct, not degenerate.** Every claim extracted from a retrospective
+article (`source_6`), across two runs, came back `contemporaneous_report` — never `fact`.
+Argued both ways before concluding this is the right answer: a source with no
+adjudicative or first-hand standing structurally cannot establish anything as fact
+regardless of how mundane the content is (`Source.tier` already caps this by design, in
+the tier-based half of `_SYSTEM_INSTRUCTION`), and since a Tier-B-only claim can never
+become `narratable` under the one-`ClaimSource`-per-claim design above, the classification
+has no live downstream consequence for this claim either way. Not treated as a defect.
+
+**Selection bias against contested content: suspected self-inflicted, tested, result is a
+three-way split by passage, not a single fix or a single failure.** Across two runs on
+`source_6` (a retrospective article), `inference`
+was never emitted once, and the source's own competing-theory passage — "some theories
+claim Karl Gabriel had not actually died..." — was not extracted at all. Promoting
+`source_7` to `CONTEMPORANEOUS` and running it twice made the pattern unambiguous:
+zero of four contested passages (a disputed burned-dress theory, contradictory police
+testimony, a disputed note, a ridiculed alibi) were extracted across two runs, on a
+source chosen specifically because it's dense with exactly this content — a *selection*
+problem, not a *labeling* one; the model wasn't miscategorizing this material, it was
+declining to propose it as a claim at all.
+
+Before filing that as an open question, checked whether the prompt itself was causing
+it. `_SYSTEM_INSTRUCTION` says "do not invent claims not supported by the text," ranks
+omission-by-caution as the safe direction, and warns against padding the list —
+language written entirely to suppress hallucination, with no thought given to whether it
+would also read, to a cautious model, as a reason to skip "Knowlton ridiculed the
+barn/hayloft story" on the theory that the barn story's truth is unverified. That
+conflates two different things: whether the *underlying claim* is true (unverified, and
+rightly so) and whether the *fact that someone made the claim* is supported by the text
+(it plainly is, right there in the source). The hallucination-suppression language never
+drew that line, so there was no reason to expect a cautious model to draw it either.
+
+**Tested, not just reasoned about.** Added an explicit paragraph distinguishing
+"contested" from "unsupported," stating that a reported argument or dispute is itself a
+directly quotable fact about the record extractable as `contemporaneous_report` or
+`inference`, with the barn/hayloft passage as a worked example. Also fixed a separate,
+concretely-observed bug in the same pass: `"Foreman-Not guilty."` had been `fact` in one
+run and `contemporaneous_report` in another, identical span both times — the
+subject-of-the-verb examples covered a court's holding but not a jury's verdict, which is
+exactly as adjudicative. Re-ran `source_7` twice after both changes:
+
+- The jury-verdict fix worked cleanly: `fact` in both runs, no more flip.
+- The contested-content fix produced **one out of four**: the barn/hayloft passage —
+  the one used as the prompt's own worked example — was extracted as
+  `contemporaneous_report` in both runs. The burned-dress theory, the contradictory
+  police testimony, and the disputed note were still not extracted, in either run.
+
+**Before filing this as an open question, ran a second experiment specifically designed
+to separate two hypotheses the first result couldn't distinguish:** H1, a genuine
+capability limit on analytically-embedded contested content; versus H2, the model simply
+extracts whatever the prompt happens to demonstrate, meaning a better-chosen example
+would fix it. The test: swap the worked example from the barn/hayloft passage to the
+burned-dress passage — same instruction, one variable changed — and re-run `source_7`
+twice again.
+
+```
+                            barn ex. (run C)  barn ex. (run D)  dress ex. (run E)  dress ex. (run F)
+barn/hayloft                report            report            report             report
+burned dress                --                --                report             report
+contradictory testimony     --                --                --                 --
+disputed note                --                --                --                 --
+```
+
+**Neither hypothesis alone fits.** The clean H2 prediction — barn/hayloft stops once it's
+no longer demonstrated — is false: it kept extracting correctly in both runs after being
+removed from the prompt entirely. That rules out pure pattern-matching-the-example as the
+whole story. But burned-dress is the opposite: absent in both runs where it wasn't the
+example, present in both runs where it was — real, clean example-sensitivity, just not on
+the passage that made it look that way originally. And the remaining two — contradictory
+police testimony, the disputed note — were extracted in **zero of four runs**, regardless
+of which example the prompt carried.
+
+The honest reading is a three-way split, not a single answer: **barn/hayloft is within
+the model's reach from the general instruction alone** (it's short, one named speaker,
+one self-contained quotable question — structurally the easiest of the four).
+**Burned-dress needs a worked example to reach reliably** (longer, causal/explanatory,
+still one named speaker). **Contradictory testimony and the disputed note have not
+succeeded under any tested condition** — both are embedded in the reporter's own
+analytical voice rather than built around one named speaker's statement, the "who is the
+subject" question the whole rule is built on doesn't cleanly apply, and neither has yet
+been tried as the demonstrated example itself. That last gap means H1 isn't confirmed for
+those two either — only that the two interventions tried so far don't reach them.
+Recording this as three-way, not as "H1" or "H2" — collapsing it into either would claim
+more than four data points across two passages actually support.
 
 **Re-extraction of a `Source` that already has any linked `Claim` is a no-op unless
 `force=True`.** Extraction is not deterministic — the same source run twice will not

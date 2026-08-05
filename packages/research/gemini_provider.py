@@ -67,10 +67,13 @@ For every claim, provide:
     Even a primary-record document reports party arguments and witness
     testimony that are not thereby adjudicated facts just because the
     document holding them is authoritative.
-  - If the subject is the COURT or TRIBUNAL itself -- verbs like holds,
-    finds, concludes, rules, orders, affirms, reverses -- that is "fact":
-    the court's own determination is the adjudicated record, not a report
-    of what someone else claimed.
+  - If the subject is the COURT, JURY, or TRIBUNAL itself -- verbs like
+    holds, finds, concludes, rules, orders, affirms, reverses, or a jury
+    returning or delivering its verdict -- that is "fact": this is the
+    adjudicating body's own determination, not a report of what someone
+    else claimed. A jury's verdict is exactly as adjudicative as a
+    judge's ruling; both are the record's own conclusion, not a party's
+    contention.
   Worked examples from a real appellate opinion:
     "On appeal, Long argues the trial court abused its discretion..."
       -> contemporaneous_report (Long is the subject; this is his
@@ -83,11 +86,45 @@ For every claim, provide:
     "Antonio Long appeals his convictions for voluntary manslaughter..."
       -> fact (a plain procedural statement -- an appeal was filed,
          sentences were imposed -- not a contention by either party)
+  Worked example from a real trial newspaper account:
+    "Foreman-Not guilty."
+      -> fact (the jury -- the adjudicating body for the facts of the
+         case -- delivering its own verdict; the same category as a
+         judge's ruling, not a party's claim, even though a newspaper
+         is the one reporting it)
 
-  If you are still unsure after applying that check, choose the more
+  Do not skip a passage because the claim it describes is contested,
+  disputed, or unproven -- that is not the same thing as "not supported
+  by the text." A contested claim is fully supported once you narrow the
+  assertion to what the text actually establishes: not "the barn story
+  is true or false" but "the prosecutor argued the defendant's
+  barn/hayloft account was not credible." That someone made an argument,
+  raised a theory, or disputed another party's account is itself a
+  plain, directly quotable fact about the record, extractable the same
+  as anything else -- as "contemporaneous_report" (their argument or
+  claim) or "inference" (your own synthesis of the dispute), never as
+  "fact" for the disputed content itself. Caution means picking the
+  right claim_type for contested material, not omitting it.
+  Worked example:
+    "He was evidently convinced that she wore the Bedford cord and
+    subsequently burned it, and in accounting for the fact that the
+    police did not find the dress at the time of their thorough search,
+    he said they were not especially careful, because they believed
+    they had the dress they wanted in their possession."
+      -> contemporaneous_report ("The prosecutor argued that Borden had
+         worn and later burned the Bedford cord dress, and explained the
+         police's failure to find it as a result of their not searching
+         carefully.") -- extractable precisely because a real argument
+         was made and is quotable, not because whether she actually
+         burned the dress is established either way.
+
+  If you are still unsure after applying these checks, choose the more
   cautious of the two, in this order, least to most confident: inference,
   contemporaneous_report, fact. Overstating confidence is the worse
-  mistake.
+  mistake -- but choosing not to extract a contested claim at all is not
+  "caution," it is an omission, and omissions are exactly what this
+  instruction is meant to prevent for genuinely unsupported invention,
+  not for real, quotable disagreements that are already in the text.
 - category: exactly one of "event", "person", "location", "timeline",
   "evidence", "legal_outcome" -- whichever the claim is primarily about.
 - date_anchor: an ISO 8601 date (YYYY-MM-DD) if the claim is clearly
