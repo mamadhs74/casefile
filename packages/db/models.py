@@ -305,6 +305,14 @@ class EntityMatch(TimestampedModel, table=True):
     EntityMatch as a gate, only as audit metadata, so there is no
     persistence-layer requirement enforcing one, on purpose. Hand-entered
     and seeded entities have none.
+
+    match_rationale is the model's stated reason this source's mention is
+    entity_id -- None on a founding match (nothing existed yet to match
+    against), required on any other match. Not validated or located, read
+    by a human, never trusted by code -- see
+    packages/research/entity_provider.py's ProposedEntity docstring.
+    Added via scripts/migrate_entity_match_rationale.py, nullable, no
+    default -- the table held zero rows at that point.
     """
 
     __tablename__ = "entity_match"
@@ -315,6 +323,7 @@ class EntityMatch(TimestampedModel, table=True):
     identifying_span: str
     span_start: int
     span_end: int
+    match_rationale: str | None = None
 
 
 class VariationProfile(TimestampedModel, table=True):

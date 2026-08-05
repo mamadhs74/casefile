@@ -9,6 +9,7 @@ from packages.db.models import (
     Claim,
     ClaimSource,
     Entity,
+    EntityMatch,
     Episode,
     Source,
     Strategy,
@@ -155,6 +156,24 @@ def make_entity(subject_id: int, **overrides: Any) -> Entity:
     )
     defaults.update(overrides)
     return Entity(**defaults)
+
+
+def make_entity_match(entity_id: int, source_id: int, **overrides: Any) -> EntityMatch:
+    # identifying_span/span_start/span_end are NOT NULL -- see EntityMatch's
+    # docstring. match_rationale defaults None (a founding match), same
+    # reasoning as make_claim_source's quoted_span default: an arbitrary
+    # but internally consistent span, tests that care pass overrides.
+    identifying_span = overrides.pop("identifying_span", "a verbatim test span")
+    defaults: dict[str, Any] = dict(
+        entity_id=entity_id,
+        source_id=source_id,
+        identifying_span=identifying_span,
+        span_start=0,
+        span_end=len(identifying_span),
+        match_rationale=None,
+    )
+    defaults.update(overrides)
+    return EntityMatch(**defaults)
 
 
 def make_subtitle_style(**overrides: Any) -> SubtitleStyle:

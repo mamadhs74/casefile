@@ -62,11 +62,14 @@ class ProposedEntity:
     posture already applied to claim_type elsewhere.
 
     match_rationale is the model's short free-text explanation of why
-    this mention is matched_entity_id -- not validated, not located, read
-    by a human, never trusted by code, the same role RejectedClaim's
-    reason strings play in claim extraction. Expected (not enforced by
-    this module) to be None exactly when matched_entity_id is None --
-    there is nothing to explain about a founding match."""
+    this mention is matched_entity_id -- its content is not validated or
+    located, read by a human, never trusted by code, the same role
+    RejectedClaim's reason strings play in claim extraction. Its
+    *presence*, though, is enforced by entity_extraction.py: rejected
+    unless it is None exactly when matched_entity_id is None -- there is
+    nothing to explain about a founding match, and a non-founding match
+    with no stated rationale would undercut the entire reason
+    EntityMatch.match_rationale exists (see docs/SCHEMA.md)."""
 
     name: str
     role: str
