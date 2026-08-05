@@ -9,6 +9,7 @@ imports this file directly.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Literal
 
 from google import genai
@@ -84,10 +85,38 @@ class _ExtractionResponseModel(BaseModel):
     claims: list[_ProposedClaimModel]
 
 
+@dataclass(frozen=True)
+class RequestPreview:
+    """What extract_claims() would send, without sending it -- for a human
+    to inspect before spending a real call, not part of
+    ClaimExtractionProvider's interface (Gemini-specific, request-shape
+    debugging only)."""
+
+    system_instruction: str
+    contents: str
+
+
 class GeminiClaimExtractor:
     def __init__(self, api_key: str, model: str = DEFAULT_MODEL) -> None:
         self._client = genai.Client(api_key=api_key)
         self._model = model
+
+    def preview_request(self, source_text: str, source_tier: str) -> RequestPreview:
+        return RequestPreview(
+            system_instruction=_SYSTEM_INSTRUCTION,
+            contents=_build_contents(source_text, source_tier),
+        )
+
+    async def count_tokens(self, source_text: str, source_tier: str) -> int:
+        """Real token count via Gemini's free count_tokens endpoint --
+        not a generation call, nothing billed against the free tier's
+        request quota."""
+        response = await self._client.aio.models.count_tokens(
+            model=self._model,
+            contents=_build_contents(source_text, source_tier),
+            config=types.CountTokensConfig(system_instruction=_SYSTEM_INSTRUCTION),
+        )
+        return response.total_tokens or 0
 
     async def extract_claims(self, source_text: str, source_tier: str) -> list[ProposedClaim]:
         response = await self._generate(source_text, source_tier, DEFAULT_MAX_OUTPUT_TOKENS)
@@ -122,7 +151,7 @@ class GeminiClaimExtractor:
     ) -> types.GenerateContentResponse:
         return await self._client.aio.models.generate_content(
             model=self._model,
-            contents=f"Source tier: {source_tier}\n\nSource text:\n{source_text}",
+            contents=_build_contents(source_text, source_tier),
             config=types.GenerateContentConfig(
                 system_instruction=_SYSTEM_INSTRUCTION,
                 response_mime_type="application/json",
@@ -130,6 +159,10 @@ class GeminiClaimExtractor:
                 max_output_tokens=max_output_tokens,
             ),
         )
+
+
+def _build_contents(source_text: str, source_tier: str) -> str:
+    return f"Source tier: {source_tier}\n\nSource text:\n{source_text}"
 
 
 def _is_truncated(response: types.GenerateContentResponse) -> bool:

@@ -23,6 +23,7 @@ import argparse
 import asyncio
 import os
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -64,6 +65,10 @@ async def main() -> int:
             return 1
 
         provider = GeminiClaimExtractor(api_key, model=args.model)
+
+        if args.dry_run:
+            await _print_request_preview(provider, source)
+
         try:
             result = await extract_claims_for_source(
                 session, source, provider, force=args.force, dry_run=args.dry_run
@@ -74,6 +79,19 @@ async def main() -> int:
 
         _report(result, dry_run=args.dry_run)
         return 0
+
+
+async def _print_request_preview(provider: GeminiClaimExtractor, source: Source) -> None:
+    source_text = Path(source.text_path).read_text(encoding="utf-8")
+    preview = provider.preview_request(source_text, source.tier.value)
+    token_count = await provider.count_tokens(source_text, source.tier.value)
+
+    print("=== request shape ===")
+    print(f"system_instruction ({len(preview.system_instruction)} chars):")
+    print(preview.system_instruction)
+    print(f"\ncontents ({len(preview.contents)} chars):")
+    print(preview.contents)
+    print(f"\n=== token estimate (real, via count_tokens) ===\n{token_count} total input tokens\n")
 
 
 def _report(result: ClaimExtractionResult, dry_run: bool) -> None:
