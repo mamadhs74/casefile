@@ -13,13 +13,12 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from packages.db.listeners import NarratableSourcingError, NonNarratableClaimError
 from packages.db.models import (
     Claim,
     ClaimEntity,
-    Entity,
     EpisodeClaim,
     Source,
     TimestampedModel,
@@ -360,22 +359,10 @@ def test_null_generation_fingerprint_allows_multiple_episodes_per_subject(
     session.commit()  # must not raise
 
 
-# --------------------------------------------------------------------------
-# Entity.living -- must be queryable
-# --------------------------------------------------------------------------
-
-
-def test_entity_living_is_queryable(session: Session, strategy_id: int) -> None:
-    subject_id = _persist(session, make_subject(strategy_id))
-    session.add(make_entity(subject_id, name="Deceased Witness", living=False))
-    session.add(make_entity(subject_id, name="Living Witness", living=True))
-    session.commit()
-
-    living_entities = session.exec(
-        select(Entity).where(Entity.subject_id == subject_id, Entity.living)
-    ).all()
-
-    assert [e.name for e in living_entities] == ["Living Witness"]
+# Entity.living's evidence invariant (Entity.before_insert/before_update,
+# Source.before_update) moved to tests/test_entity_persistence.py -- it's
+# its own concern, not a Claim one, and the old version here constructed
+# living=True/False directly at insert, which the new invariant rejects.
 
 
 def test_duplicate_claim_entity_link_is_rejected(session: Session, strategy_id: int) -> None:

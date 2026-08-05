@@ -1128,26 +1128,40 @@ exempt. `living` stays indexed for the same reason it always was — cheap, dire
 filtering once render gating reads it — a nullable indexed boolean loses nothing there.
 
 **`living_evidence` is a located span, not a free-typed string** — the same defense this
-document applies everywhere else a claim about text is made. `_locate_span()` finds it
-in `living_evidence_source_id`'s actual text and computes
-`living_evidence_span_start`/`_end` from the match, exactly like `ClaimSource`'s
-`quoted_span`. A reviewer typing "confirmed via obituary" with no located text is exactly
-the unverifiable assertion the fabrication/misattribution note above exists to rule out.
+document applies everywhere else a claim about text is made. `locate_span()`
+(`packages.domain.spans`, shared with `ClaimSource`'s own span verification) finds it in
+`living_evidence_source_id`'s actual text; `living_evidence_span_start`/`_end` are
+verified against that match, not silently recomputed from it. A reviewer typing
+"confirmed via obituary" with no located text is exactly the unverifiable assertion the
+fabrication/misattribution note above exists to rule out.
 
-**Not built: the invariant this needs at the persistence layer.** No code exists for
-this yet — same status as the R8 render check and the stage-3 `image_rights=NONE` block
-already flagged unbuilt elsewhere in this section. Proposed shape, mirroring the
-`narratable` invariant: `living` should only be allowed to move away from `None` when a
-located `living_evidence` (source, span, offsets) accompanies the write in the same
-transaction, rejecting an evidence-free `True`/`False` write rather than silently
-accepting it — and `living_evidence_source_id` should be required to resolve to a Tier A
-source (`PRIMARY_RECORD` or `CONTEMPORANEOUS`), the same `TIER_A_SOURCE_TIERS` bar the
-`narratable` invariant already holds a single sentence of narration to. An
-`UNVERIFIED`-sourced claim of death clearing R8 for a real living person would make this
-gate weaker than the sourcing standard for ordinary narration, and nothing about this
-determination is lower-stakes than that. Until this is built, nothing stops `living`
-being set with no evidence, or with evidence from any tier, at all — the column exists,
-the invariant protecting it does not.
+**Built: the invariant enforcing this, `packages/db/listeners.py`.** Three touchpoints,
+mirroring the `narratable` invariant's shape, all raising `LivingEvidenceError`:
+
+1. `Entity.before_insert` rejects any non-`None` `living` outright — an `EntityMatch` row
+   satisfying touchpoint 2's fourth condition can't reference an entity that doesn't have
+   an id yet, so this isn't really a check, it falls out of FK ordering, same as
+   `narratable=True` at Claim creation. **Consequence: creating an `Entity` and evidencing
+   its `living` status are always two separate writes.** There is no single write that
+   creates an `Entity` with `living` already set — every entity is created with
+   `living=None`, full stop, and evidenced later via a separate update.
+2. `Entity.before_update`, when `living` is being set away from `None`, rejects unless:
+   all four evidence fields are present; `living_evidence_source_id` resolves to a Tier A
+   source (`PRIMARY_RECORD` or `CONTEMPORANEOUS`) — the same `TIER_A_SOURCE_TIERS` bar the
+   `narratable` invariant holds a single sentence of narration to, because an
+   `UNVERIFIED`-sourced claim of death clearing R8 for a real living person would make
+   this gate weaker than ordinary narration, and nothing about this determination is
+   lower-stakes than that; an `EntityMatch` row exists linking that source to this same
+   entity (closes the misattribution gap — a real, correctly-quoted death notice from a
+   source never established to be *about* this entity); and `living_evidence` is actually
+   located at the stated offsets in that source's text, read from disk.
+3. `Source.before_update` rejects a tier downgrade below Tier A for any source currently
+   cited as an `Entity`'s `living_evidence_source_id` — mirrors the `narratable` invariant's
+   own tier-downgrade guard, as a separate function, not merged into it.
+
+**Known limitation, shared with every `narratable` touchpoint above, not new here:** all
+of this fires on ORM flush only. A bulk `UPDATE` issued outside the ORM, or raw SQL
+against the `.db` file, bypasses it entirely.
 
 **R8's gate condition is `living IS NOT False`** — `True` and `None` both trigger review;
 only an evidenced `False` clears it. This is the direct fix for the representability bug

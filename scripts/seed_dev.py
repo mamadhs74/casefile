@@ -363,11 +363,16 @@ def seed() -> None:
         session.add(inquiry_opened_claim)
         session.commit()
 
+        # living is left at its None default -- packages/db/listeners.py
+        # rejects any non-None living at creation unconditionally, and
+        # neither of these has an evidenced source backing a determination.
+        # These are exactly the two rows scripts/migrate_entity_living.py
+        # already reset to NULL in the live dev DB; this keeps a fresh seed
+        # consistent with that.
         captain = Entity(
             subject_id=meridian.id,
             name="Captain of the SS Meridian",
             role=EntityRole.VICTIM,
-            living=False,
             adjudicated=False,
             image_rights=ImageRights.PUBLIC_DOMAIN,
         )
@@ -375,7 +380,6 @@ def seed() -> None:
             subject_id=meridian.id,
             name="Board of Trade Inquiry Chair",
             role=EntityRole.INVESTIGATOR,
-            living=False,
             adjudicated=False,
             image_rights=ImageRights.PUBLIC_DOMAIN,
         )

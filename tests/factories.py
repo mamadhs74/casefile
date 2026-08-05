@@ -141,11 +141,15 @@ def make_claim_source(claim_id: int, source_id: int, **overrides: Any) -> ClaimS
 
 
 def make_entity(subject_id: int, **overrides: Any) -> Entity:
+    # living defaults None, not False: packages/db/listeners.py rejects any
+    # non-None living at creation unconditionally (mirrors narratable), and
+    # a False default here would make every unmodified make_entity() call
+    # fail at insert. See docs/SCHEMA.md's Entity section.
     defaults: dict[str, Any] = dict(
         subject_id=subject_id,
         name="Test Entity",
         role=EntityRole.WITNESS,
-        living=False,
+        living=None,
         adjudicated=False,
         image_rights=ImageRights.PUBLIC_DOMAIN,
     )
