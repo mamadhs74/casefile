@@ -243,9 +243,21 @@ class Entity(TimestampedModel, table=True):
     subject dedup exists), simpler for now and not a breaking choice to
     revisit later.
 
-    living is indexed on purpose, not just typed: it gates render (a living,
-    named individual trips R8 and blocks render pending review) and is
-    expected to be filtered on, not just stored.
+    living is nullable, not defaulted to False: a plain default-False
+    boolean can't represent "nobody has checked" without lying -- it
+    reads exactly like a verified determination the moment it's stored.
+    True/False/None is deliberate tri-state -- see docs/SCHEMA.md. No
+    role is exempt from needing evidence, victims included.
+    living_evidence_source_id/living_evidence/living_evidence_span_start/
+    _end are the located span backing a living/False determination,
+    same verifiability mechanism as ClaimSource.quoted_span -- located by
+    code, not a free-typed string. The invariant that living may only
+    move off None with this evidence present, from a Tier A source, is
+    not yet enforced here -- see docs/SCHEMA.md, not built yet.
+
+    living stays indexed even though nullable now: it gates render (any
+    entity where living IS NOT False trips R8 and blocks render pending
+    review) and is expected to be filtered on directly, not just stored.
 
     adjudicated is descriptive only for this pass -- it isn't wired into
     LegalRisk scoring or anything else yet.
@@ -256,7 +268,11 @@ class Entity(TimestampedModel, table=True):
     subject_id: int = Field(foreign_key="subject.id", index=True)
     name: str
     role: EntityRole
-    living: bool = Field(index=True)
+    living: bool | None = Field(default=None, index=True)
+    living_evidence_source_id: int | None = Field(default=None, foreign_key="source.id")
+    living_evidence: str | None = None
+    living_evidence_span_start: int | None = None
+    living_evidence_span_end: int | None = None
     adjudicated: bool
     image_rights: ImageRights
 
@@ -267,6 +283,38 @@ class ClaimEntity(TimestampedModel, table=True):
 
     claim_id: int = Field(foreign_key="claim.id", index=True)
     entity_id: int = Field(foreign_key="entity.id", index=True)
+
+
+class EntityMatch(TimestampedModel, table=True):
+    """Persisted per-source match decision -- docs/SCHEMA.md's EntityMatch
+    section. One row per (entity, source) that identifies it, including
+    the entity's founding source, not just later matches: replaces "trust
+    the model's merge decision" with "every source's contribution to an
+    entity's identity is independently inspectable." identifying_span/
+    span_start/span_end are located the same way ClaimSource locates
+    quoted_span -- a whitespace-normalized regex match against the
+    source's text, never a model-supplied offset.
+
+    No tier bar on source_id: identity matching is provenance metadata,
+    not a narratable assertion, and requiring Tier A here would mean
+    entities could only ever be extracted from Tier A sources -- unlike
+    living_evidence_source_id, which does require Tier A because it backs
+    the R8 render gate directly.
+
+    Entity does not require an EntityMatch row to exist -- nothing reads
+    EntityMatch as a gate, only as audit metadata, so there is no
+    persistence-layer requirement enforcing one, on purpose. Hand-entered
+    and seeded entities have none.
+    """
+
+    __tablename__ = "entity_match"
+    __table_args__ = (UniqueConstraint("entity_id", "source_id", name="uq_entity_match"),)
+
+    entity_id: int = Field(foreign_key="entity.id", index=True)
+    source_id: int = Field(foreign_key="source.id", index=True)
+    identifying_span: str
+    span_start: int
+    span_end: int
 
 
 class VariationProfile(TimestampedModel, table=True):
