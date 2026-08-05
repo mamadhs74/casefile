@@ -64,7 +64,6 @@ step's job, not something a single-source extraction pass does.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -72,6 +71,7 @@ from sqlmodel import Session, select
 
 from packages.db.models import Claim, ClaimSource, Source
 from packages.domain.enums import TIER_A_SOURCE_TIERS, ClaimCategory, ClaimConfidence, ClaimType
+from packages.domain.spans import locate_span
 from packages.research.llm_provider import ClaimExtractionProvider, ProposedClaim
 
 MAX_QUOTED_SPAN_CHARS = 800
@@ -229,24 +229,6 @@ def _has_existing_claims(session: Session, source_id: int) -> bool:
     )
 
 
-def _locate_span(quote: str, source_text: str) -> tuple[int, int] | None:
-    """Find quote in source_text allowing only whitespace differences.
-    Every non-whitespace character in quote must appear literally, in
-    order; any run of whitespace in quote matches any run of whitespace in
-    the source (a single PDF line-wrap, several blank-line page-break
-    newlines, whatever). Built as a regex from quote's own whitespace-
-    delimited tokens, escaped, joined by \\s+, and searched directly
-    against the original text -- so the real (start, end) comes straight
-    from the match, with no separate normalized copy to remap offsets out
-    of. Returns None if no such match exists anywhere in the source."""
-    tokens = quote.split()
-    pattern = r"\s+".join(re.escape(token) for token in tokens)
-    match = re.search(pattern, source_text)
-    if match is None:
-        return None
-    return match.start(), match.end()
-
-
 def _validate(candidate: ProposedClaim, source_text: str) -> _ValidatedCandidate | str:
     """Returns the validated span/enum values, or a short rejection-reason
     string identifying which check failed."""
@@ -254,7 +236,7 @@ def _validate(candidate: ProposedClaim, source_text: str) -> _ValidatedCandidate
     if not quote.strip():
         return "empty_quote"
 
-    span = _locate_span(quote, source_text)
+    span = locate_span(quote, source_text)
     if span is None:
         return "quote_not_found"
     span_start, span_end = span
