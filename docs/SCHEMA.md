@@ -1211,6 +1211,7 @@ revisiting once something actually reads `Entity.living` for render gating.
 | `source_id` | FK Source | |
 | `identifying_span` | str | verbatim substring in that source identifying this entity |
 | `span_start`, `span_end` | int | located the same way `ClaimSource` locates `quoted_span` — a whitespace-normalized regex match against the source text, never a model-supplied offset |
+| `match_rationale` | str \| None | the model's stated reason this source's mention is this entity — see below. `None` for a founding match (nothing existed yet to match against) |
 
 `UniqueConstraint(entity_id, source_id)` — one match per source per entity, same
 reasoning as "exactly one `ClaimSource` per claim" above.
@@ -1248,6 +1249,46 @@ source → claim extraction → entity extraction, sequential across a subject's
 parallel — is load-bearing, not incidental: running it "independently" of claim
 extraction wouldn't just go untested, it would change what the pass can produce, because
 of the order-dependence problem above.
+
+**`KnownEntity` (the per-entity summary passed in-prompt for match-or-new) carries
+`entity_id`, `name`, `role`, and one `identifying_span` — from that entity's *founding*
+match, not its most recent one, for two reasons.** First, determinism: a founding span
+is fixed the moment the entity is created and stays fixed regardless of what order later
+sources get processed in, where "most recent" would make the same entity's own
+prompt representation drift depending on extraction order — compounding the
+order-dependence problem above rather than staying independent of it. Second, and just
+as load-bearing: the founding span is the one that was already inspected when the entity
+was created — whatever attention (human or model) went into deciding this was a real,
+distinct person happened against that span, so it's the span with the most scrutiny
+already behind it, not an arbitrary pick among equally-unexamined options.
+
+**`KnownEntity` also carries the founding match's `source_id` and that source's `title`**
+— name and role alone can't disambiguate two different real people who share both, which
+is a real, not hypothetical, shape of failure for this domain (family members in the same
+case: two "Miss Borden"s, mother and daughter, or siblings sharing a surname and the same
+`WITNESS` role). Without the founding source's identity, the model has nothing to tell
+"the Miss Borden in the 1892 inquest transcript" from "the Miss Borden in the 1893 trial
+record" — exactly the wrong-match-at-creation failure `EntityMatch` exists to make
+inspectable, reintroduced one level up if the prompt itself can't distinguish them.
+
+**`ProposedEntity` carries `matched_entity_id` (or `None` for a new entity) plus a
+`match_rationale`: a short free-text statement of why the model believes this mention is
+that entity.** Not validated, not located — the same role `RejectedClaim`'s reason
+strings play in claim extraction, audit information for a human, not a machine-checked
+fact. Without it, a wrong match is auditable only as "the model said so," which
+undercuts the actual reason `EntityMatch` exists: making a match decision inspectable,
+not just correct-by-assertion. `match_rationale` persists on the `EntityMatch` row itself
+(see above) — the same table already carrying the located `identifying_span`, since a
+match decision's rationale is a property of one specific (entity, source) pairing, not of
+the entity as a whole (the same entity can be matched from several sources, each with its
+own rationale). `None` on a founding match, where there was nothing to match against and
+so nothing to explain.
+
+This is a prompt-and-shape change only, not a change to how a match decision gets
+verified: `matched_entity_id` still gets the same defensive re-check as any other
+model-supplied identifier (rejected if it isn't `None` and isn't one of the ids actually
+sent in that call's `known_entities`) regardless of what rationale accompanies it —
+`match_rationale` is read by a human, never trusted by code.
 
 **`force=True` on a `Source` that already has linked `Entity`/`ClaimEntity` rows:** same
 posture as `claim_extraction.py`'s own re-extraction semantics, exactly — never deletes
