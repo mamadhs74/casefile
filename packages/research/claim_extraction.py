@@ -19,13 +19,29 @@ Order, all before any persistence:
 2. Ask the provider for proposed claims, source.tier passed as context.
 3. For each proposed claim, in order:
    a. Reject if quoted_span is blank.
-   b. Reject if quoted_span is not found as an exact substring of the
-      source's text (no whitespace normalization) -- the primary defense
-      against a hallucinated citation. "Close but not exact" is exactly
-      the failure this is meant to catch, so normalizing to make a
-      near-match pass would defeat the point.
+   b. Reject if quoted_span is not found in the source's text once
+      whitespace is normalized -- every run of whitespace (space,
+      newline, tab) matches any run of whitespace, but every other
+      character must match literally. This is not a relaxation of the
+      hallucination check: a substituted word, an invented clause, or
+      reordered content still fails outright, because those aren't
+      whitespace. What it fixes is real: PDF extraction preserves the
+      source document's physical line breaks, so a quote spanning even
+      one line-wrap in the original PDF contains a `\n` mid-sentence that
+      no model reproduces (nor should it -- reproducing arbitrary
+      column-width line breaks isn't "more faithful," it's reproducing a
+      rendering artifact). A byte-exact rule rejects that quote for a
+      reason that has nothing to do with whether the claim is true or the
+      citation is real. See docs/SCHEMA.md for the investigation that
+      found this: on a real court-opinion PDF, every substantive claim
+      was rejected this way and only a one-line filing-date stamp
+      survived, which is a corpus-wide bias against exactly the sentences
+      an episode would use, not evidence of a well-functioning filter.
    c. Reject if the located span exceeds MAX_QUOTED_SPAN_CHARS -- a
       "supporting passage" longer than that isn't reviewable in seconds.
+      Measured on the real matched span in the source, which can be
+      longer than the model's own quote once its whitespace expands back
+      to the source's actual line breaks.
    d. Reject if claim_type or category isn't a recognized value. The
       provider's own structured-output schema should make this
       unreachable; this check is defensive, not load-bearing.
@@ -48,6 +64,7 @@ step's job, not something a single-source extraction pass does.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -71,7 +88,13 @@ _CONFIDENCE_BY_CLAIM_TYPE: dict[ClaimType, ClaimConfidence] = {
 
 @dataclass(frozen=True)
 class RejectedClaim:
+    """quoted_span is what the model attempted, kept even on rejection --
+    a rejected claim is the thing most worth being able to inspect (was
+    this a real near-miss, a genuine invention, or something the matching
+    rule got wrong?), and a reason string alone can't answer that."""
+
     assertion: str
+    quoted_span: str
     reason: str  # "empty_quote" | "quote_not_found" | "span_too_long" |
     # "invalid_claim_type" | "invalid_category"
 
@@ -107,6 +130,10 @@ class _ValidatedCandidate:
     category: ClaimCategory
     span_start: int
     span_end: int
+    quoted_span: str  # source_text[span_start:span_end] -- the real
+    # matched text, including the source's own line breaks if any, not
+    # the model's normalized version. Keeps quoted_span consistent with
+    # the offsets it's stored alongside.
 
 
 async def extract_claims_for_source(
@@ -132,7 +159,13 @@ async def extract_claims_for_source(
     for candidate in proposed:
         outcome = _validate(candidate, source_text)
         if isinstance(outcome, str):
-            rejected.append(RejectedClaim(assertion=candidate.assertion, reason=outcome))
+            rejected.append(
+                RejectedClaim(
+                    assertion=candidate.assertion,
+                    quoted_span=candidate.quoted_span,
+                    reason=outcome,
+                )
+            )
             continue
 
         confidence = _CONFIDENCE_BY_CLAIM_TYPE[outcome.claim_type]
@@ -158,7 +191,7 @@ async def extract_claims_for_source(
                 ClaimSource(
                     claim_id=claim_id,
                     source_id=source_id,
-                    quoted_span=candidate.quoted_span,
+                    quoted_span=outcome.quoted_span,
                     span_start=outcome.span_start,
                     span_end=outcome.span_end,
                 )
@@ -173,7 +206,7 @@ async def extract_claims_for_source(
                 claim_type=outcome.claim_type,
                 confidence=confidence,
                 date_anchor=candidate.date_anchor,
-                quoted_span=candidate.quoted_span,
+                quoted_span=outcome.quoted_span,
                 span_start=outcome.span_start,
                 span_end=outcome.span_end,
             )
@@ -196,6 +229,24 @@ def _has_existing_claims(session: Session, source_id: int) -> bool:
     )
 
 
+def _locate_span(quote: str, source_text: str) -> tuple[int, int] | None:
+    """Find quote in source_text allowing only whitespace differences.
+    Every non-whitespace character in quote must appear literally, in
+    order; any run of whitespace in quote matches any run of whitespace in
+    the source (a single PDF line-wrap, several blank-line page-break
+    newlines, whatever). Built as a regex from quote's own whitespace-
+    delimited tokens, escaped, joined by \\s+, and searched directly
+    against the original text -- so the real (start, end) comes straight
+    from the match, with no separate normalized copy to remap offsets out
+    of. Returns None if no such match exists anywhere in the source."""
+    tokens = quote.split()
+    pattern = r"\s+".join(re.escape(token) for token in tokens)
+    match = re.search(pattern, source_text)
+    if match is None:
+        return None
+    return match.start(), match.end()
+
+
 def _validate(candidate: ProposedClaim, source_text: str) -> _ValidatedCandidate | str:
     """Returns the validated span/enum values, or a short rejection-reason
     string identifying which check failed."""
@@ -203,12 +254,12 @@ def _validate(candidate: ProposedClaim, source_text: str) -> _ValidatedCandidate
     if not quote.strip():
         return "empty_quote"
 
-    span_start = source_text.find(quote)
-    if span_start == -1:
+    span = _locate_span(quote, source_text)
+    if span is None:
         return "quote_not_found"
-    span_end = span_start + len(quote)
+    span_start, span_end = span
 
-    if len(quote) > MAX_QUOTED_SPAN_CHARS:
+    if span_end - span_start > MAX_QUOTED_SPAN_CHARS:
         return "span_too_long"
 
     try:
@@ -226,5 +277,9 @@ def _validate(candidate: ProposedClaim, source_text: str) -> _ValidatedCandidate
         return "invalid_category"
 
     return _ValidatedCandidate(
-        claim_type=claim_type, category=category, span_start=span_start, span_end=span_end
+        claim_type=claim_type,
+        category=category,
+        span_start=span_start,
+        span_end=span_end,
+        quoted_span=source_text[span_start:span_end],
     )

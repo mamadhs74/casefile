@@ -18,7 +18,13 @@ from pydantic import BaseModel
 
 from packages.research.llm_provider import ProposedClaim, TruncatedExtractionError
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+# "gemini-2.5-flash" and "gemini-2.5-flash-lite" both 404 live on this
+# account ("no longer available to new users") despite still appearing in
+# models.list() -- confirmed against the real API, not documentation,
+# while validating this module. The "-latest" alias is Google's own
+# indirection against exactly this churn; use it rather than pinning a
+# dated model string that can be quietly cut off for new accounts.
+DEFAULT_MODEL = "gemini-flash-latest"
 
 DEFAULT_MAX_OUTPUT_TOKENS = 8192
 RETRY_MAX_OUTPUT_TOKENS = 16384
@@ -110,11 +116,16 @@ class GeminiClaimExtractor:
     async def count_tokens(self, source_text: str, source_tier: str) -> int:
         """Real token count via Gemini's free count_tokens endpoint --
         not a generation call, nothing billed against the free tier's
-        request quota."""
+        request quota. CountTokensConfig.system_instruction is rejected
+        outright on the Gemini Developer API (API-key auth) -- "only
+        supported in Gemini Enterprise Agent Platform mode", confirmed
+        by hitting the real error -- so the system instruction is
+        concatenated into the counted text instead of passed via config.
+        Slightly different tokenization than the real request's separate
+        system_instruction field, close enough for an estimate."""
         response = await self._client.aio.models.count_tokens(
             model=self._model,
-            contents=_build_contents(source_text, source_tier),
-            config=types.CountTokensConfig(system_instruction=_SYSTEM_INSTRUCTION),
+            contents=_SYSTEM_INSTRUCTION + "\n\n" + _build_contents(source_text, source_tier),
         )
         return response.total_tokens or 0
 

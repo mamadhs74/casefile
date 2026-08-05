@@ -738,15 +738,59 @@ actually needs more.
 model returns `quoted_span` — a claimed verbatim copy of the exact passage supporting
 its assertion — never a character offset; asking a model for raw character positions in
 arbitrary-length text isn't something LLMs can do reliably. `claim_extraction.py` then
-locates that string in the source text via an **exact substring search, no whitespace
-normalization**, and computes `span_start`/`span_end` from the match. A quote that
-isn't found verbatim is rejected before persistence, unconditionally. This is the
-primary defense against a hallucinated citation, and it matters more with a smaller
-free-tier model, not less — a smaller model is more likely to paraphrase, embellish, or
-invent a citation than a frontier one, and this check is exactly what catches it.
-Located spans over `MAX_QUOTED_SPAN_CHARS` (800) are also rejected — a "supporting
-passage" longer than that isn't something a reviewer can check in seconds, which is the
-entire point of storing it.
+locates that string in the source text and computes `span_start`/`span_end` from the
+match. A quote that isn't located is rejected before persistence, unconditionally. This
+is the primary defense against a hallucinated citation, and it matters more with a
+smaller free-tier model, not less — a smaller model is more likely to paraphrase,
+embellish, or invent a citation than a frontier one, and this check is exactly what
+catches it. Located spans over `MAX_QUOTED_SPAN_CHARS` (800) are also rejected — a
+"supporting passage" longer than that isn't something a reviewer can check in seconds,
+which is the entire point of storing it.
+
+**Matching normalizes whitespace only; every other character must match literally —
+this was not the first version, and the first version was wrong.** The original design
+required an exact byte substring, no normalization at all, on the reasoning that
+normalizing anything would let a near-paraphrase slip past as a match. Tested against a
+real court-opinion PDF, that rule turned out to reject nearly everything: `pypdf`
+preserves the source PDF's physical line breaks as literal `\n` characters, so any quote
+spanning even one line-wrap in the original document contains a mid-sentence newline no
+model reproduces (nor should it — reproducing a column-width line-wrap position isn't
+more faithful quoting, it's reproducing a rendering artifact). Since every substantive
+sentence in a paginated document is longer than one line, this meant every substantive
+claim was rejected and only a single one-line filing-date stamp survived — a systematic
+bias against exactly the sentences an episode would use, discovered by running the
+pipeline against a real PDF and noticing the one surviving claim was trivia while every
+rejected one was substance. Confirmed directly: comparing the model's rejected quotes
+against the source character-by-character showed the words, order, and punctuation
+matched in every case — the only difference was `pypdf`'s embedded line-wrap newlines.
+
+The fix: `_locate_span()` builds a regex from the quote's whitespace-delimited tokens
+(each escaped, joined by `\s+`) and searches it against the source text directly, so
+`span_start`/`span_end` come from the real match — no separate normalized copy, no
+offset remapping. A run of whitespace in the quote matches any run of whitespace in the
+source; every non-whitespace character still has to match exactly, so a substituted
+word, an invented clause, or reordered content still fails the same as before. The
+stored `quoted_span` is the actual matched substring from the source text (embedded
+newlines included, if any), not the model's normalized version — `ClaimSource.quoted_span
+== source_text[span_start:span_end]` always holds, which also means it stays
+byte-findable against the source file itself.
+
+**Checked against an HTML source too, not assumed fixed everywhere.** `trafilatura`
+does not have this problem the same way: its line breaks land at paragraph/sentence
+boundaries, not at arbitrary column width mid-sentence, so a model's one-sentence quote
+rarely crosses one. Confirmed empirically on a real fetched article — all 7 claims
+extracted matched with zero embedded newlines in any of the located spans, meaning the
+byte-exact rule would have passed every one of them too. The whitespace-normalization
+fix is a no-op on this source, not merely harmless: nothing about it was needed here.
+This was a PDF-extraction-specific defect, and the fix targets exactly that without
+changing behavior on HTML sources.
+
+**`RejectedClaim` stores the attempted `quoted_span`, not just the rejection reason.**
+The original version only recorded why a candidate was rejected, which meant diagnosing
+this exact defect required making fresh, non-deterministic API calls to reconstruct what
+the model had actually proposed — the original run's rejected quotes were simply gone. A
+rejected claim is the thing most worth being able to inspect later, and it was the thing
+being discarded most completely.
 
 **This makes citations structurally verifiable, not semantically verifiable — and
 that boundary matters more than it sounds.** The mechanism proves a claim's quote

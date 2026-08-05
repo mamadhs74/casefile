@@ -31,6 +31,15 @@ SOURCE_TEXT = (
     "been killed."
 )
 
+# Mimics pypdf's real behavior: the original document's physical line wrap
+# is preserved as a literal newline mid-sentence -- see docs/SCHEMA.md's
+# claim-extraction section for the real court-PDF case this was found on.
+PDF_STYLE_SOURCE_TEXT = (
+    "In March 1922, six people vanished from a small farmstead in Bavaria. \n"
+    "Andreas Gruber, his wife, their widowed \ndaughter, and her four children \n"
+    "had not been seen for several days."
+)
+
 
 class _FakeProvider:
     def __init__(self, claims: list[ProposedClaim]) -> None:
@@ -152,6 +161,7 @@ async def test_quote_not_found_verbatim_is_rejected_not_persisted(
     assert result.claims == []
     assert len(result.rejected) == 1
     assert result.rejected[0].reason == "quote_not_found"
+    assert result.rejected[0].quoted_span == "a sentence that never appears in the source"
     assert session.exec(select(Claim)).all() == []
 
 
@@ -173,6 +183,59 @@ async def test_close_but_not_exact_quote_is_rejected(
 
     assert result.claims == []
     assert result.rejected[0].reason == "quote_not_found"
+
+
+async def test_quote_matches_across_a_pdf_line_wrap(
+    session: Session, strategy_id: int, tmp_path: Path
+) -> None:
+    """The regression this whole mechanism was built for: pypdf preserves
+    the source PDF's physical line breaks, so a real, accurately-quoted
+    passage that happens to span one line-wrap contains a newline the
+    model has no reason to reproduce. Whitespace-normalized matching must
+    still find it -- and the persisted quoted_span/span_start/span_end
+    must reflect the source's actual text (embedded newline included),
+    not the model's normalized version, since ClaimSource.quoted_span
+    must equal source_text[span_start:span_end]."""
+    model_quote = "Andreas Gruber, his wife, their widowed daughter, and her four children"
+    # confirms the newline really blocks a literal (non-normalized) match
+    assert model_quote not in PDF_STYLE_SOURCE_TEXT
+
+    subject_id = _persist_subject(session, strategy_id)
+    text_path = tmp_path / "pdf_source.txt"
+    text_path.write_text(PDF_STYLE_SOURCE_TEXT, encoding="utf-8")
+    source = _make_source(session, subject_id, tmp_path, text_path=str(text_path))
+    provider = _FakeProvider([_valid_candidate(quoted_span=model_quote)])
+
+    result = await extract_claims_for_source(session, source, provider)
+
+    assert len(result.claims) == 1
+    claim = result.claims[0]
+    expected_span = PDF_STYLE_SOURCE_TEXT[claim.span_start : claim.span_end]
+    assert claim.quoted_span == expected_span
+    assert "\n" in claim.quoted_span  # the real source substring, not the model's normalized quote
+    assert claim.quoted_span != model_quote
+
+
+async def test_substituted_word_across_a_pdf_line_wrap_is_still_rejected(
+    session: Session, strategy_id: int, tmp_path: Path
+) -> None:
+    """Requirement: whitespace tolerance must not let a real content
+    change ride along with it. Same passage as the line-wrap test above,
+    but "daughter" -> "son" -- must still fail even though the rest of
+    the passage, including its line-wrap, would otherwise match."""
+    substituted = "Andreas Gruber, his wife, their widowed son, and her four children"
+
+    subject_id = _persist_subject(session, strategy_id)
+    text_path = tmp_path / "pdf_source.txt"
+    text_path.write_text(PDF_STYLE_SOURCE_TEXT, encoding="utf-8")
+    source = _make_source(session, subject_id, tmp_path, text_path=str(text_path))
+    provider = _FakeProvider([_valid_candidate(quoted_span=substituted)])
+
+    result = await extract_claims_for_source(session, source, provider)
+
+    assert result.claims == []
+    assert result.rejected[0].reason == "quote_not_found"
+    assert result.rejected[0].quoted_span == substituted
 
 
 async def test_span_too_long_is_rejected(

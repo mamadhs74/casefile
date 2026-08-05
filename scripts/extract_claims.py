@@ -112,6 +112,7 @@ def _report(result: ClaimExtractionResult, dry_run: bool) -> None:
         print(f"rejected {len(result.rejected)} candidate(s):")
         for r in result.rejected:
             print(f"  [{r.reason}] {r.assertion}")
+            print(f"    attempted quote: {r.quoted_span!r}")
 
     if result.zero_claims_on_tier_a_source:
         print(
