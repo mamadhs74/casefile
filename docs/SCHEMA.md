@@ -830,6 +830,19 @@ that. That's a human's job at review time, not something this system does for th
 stating plainly because it's easy to later assume the offset mechanism buys more safety
 than it does.
 
+**Span verification prevents fabrication, not misattribution — a narrower and
+different limit than the one above.** `_locate_span()` proves `quoted_span` is a real,
+verbatim substring of the source; it says nothing about whether the model attributed
+that passage to the right party. A verbatim, correctly-located quote can still be
+pinned on the wrong speaker, the wrong subject, the wrong date — anything the span
+itself doesn't encode, and the located offsets can't catch it because the located text
+really is in the source, unaltered. This is not the same gap as "structurally
+verifiable, not semantically verifiable" above (that one is about whether the claim's
+conclusion follows from the quote); this one is about whether the quote is even about
+the right party in the first place. Applies to `quoted_span` on `Claim` today, and to
+any other span-based verification this pattern gets reused for later — entity
+identifying spans included.
+
 **`claim_type` is constrained to `{FACT, CONTEMPORANEOUS_REPORT, INFERENCE}` at the
 provider's own structured-output schema** — `DISPUTED` is never a valid extraction
 output (defensively re-checked in `claim_extraction.py` too, in case a provider's schema
@@ -1064,21 +1077,26 @@ persists nothing) and `--force`.
 
 ---
 
-## Entity, ClaimEntity
+## Entity, ClaimEntity, EntityMatch
 
 docs/SOURCING.md's entity table — a named person in a Subject's record. Subject-scoped,
 not global: the same real person appearing across multiple subjects is out of scope for
 this pass (no cross-subject dedup exists). Simpler for now, and not a breaking choice to
-revisit later if cross-subject entity reuse ever becomes a real requirement.
+revisit later if cross-subject entity reuse ever becomes a real requirement. Being
+subject-scoped also means the review work described below is a **per-subject cost, not
+a per-episode one** — see "What R8 gates" below.
 
 | field | type | notes |
 |---|---|---|
 | `subject_id` | FK Subject | |
 | `name` | str | |
 | `role` | EntityRole | |
-| `living` | bool, **indexed** | gates render — see below |
+| `living` | bool \| None, **indexed**, default `None` | tri-state — see below. No role-based exception. |
+| `living_evidence_source_id` | FK Source \| None | source the living/deceased determination is drawn from |
+| `living_evidence` | str \| None | verbatim span from that source, located by code — see below |
+| `living_evidence_span_start`, `living_evidence_span_end` | int \| None | |
 | `adjudicated` | bool | descriptive only, not wired into anything yet |
-| `image_rights` | ImageRights | |
+| `image_rights` | ImageRights | never model-supplied — see below |
 
 ```python
 class EntityRole(StrEnum):
@@ -1095,13 +1113,58 @@ class ImageRights(StrEnum):
     NONE = "none"
 ```
 
-`living=True` on any entity trips docs/POLICY.md's R8 and blocks render pending review.
-(POLICY.md's "Derived engineering requirements" table numbers its own rules
-independently of CLAUDE.md's R1–R7 — they collide on numbers without sharing content;
-"R8" here is POLICY.md's.) `living` is indexed, not just typed, because it's expected to
-be filtered on directly once render gating exists, not just stored. `image_rights=NONE`
-blocks that entity from stage 3 shot selection. Neither consuming check is built yet —
-these columns exist so they have somewhere to read from once they are.
+### `living`, `living_evidence`, and R8
+
+**`living` is nullable, not defaulted to `False`, and this is a correction, not a style
+choice.** A plain default-`False` boolean cannot represent "nobody has checked" without
+lying — the moment it's stored, it reads exactly like a verified determination. An
+earlier version of this design exempted `VICTIM`-role entities from needing living
+verification at all, on the reasoning that a homicide case's own sources always
+establish the victim's death. Dropped: `CaseType.DISAPPEARANCE` alone is proof a role
+can't imply an outcome, and leaning on "it's a homicide case" for a modern subject is
+exactly the kind of unverified assumption this schema's conventions refuse elsewhere
+(`AssetStore` won't infer a license; `tiering.py` won't auto-assign Tier A). No role is
+exempt. `living` stays indexed for the same reason it always was — cheap, direct
+filtering once render gating reads it — a nullable indexed boolean loses nothing there.
+
+**`living_evidence` is a located span, not a free-typed string** — the same defense this
+document applies everywhere else a claim about text is made. `_locate_span()` finds it
+in `living_evidence_source_id`'s actual text and computes
+`living_evidence_span_start`/`_end` from the match, exactly like `ClaimSource`'s
+`quoted_span`. A reviewer typing "confirmed via obituary" with no located text is exactly
+the unverifiable assertion the fabrication/misattribution note above exists to rule out.
+
+**Enforced at the persistence layer, same shape as the `narratable` invariant:** `living`
+may only move away from `None` when a located `living_evidence` (source, span, offsets)
+accompanies the write in the same transaction. Setting `living` to either `True` or
+`False` with no evidence is rejected, not silently accepted — concluding someone is dead
+needs the same proof as concluding they're alive.
+
+**R8's gate condition is `living IS NOT False`** — `True` and `None` both trigger review;
+only an evidenced `False` clears it. This is the direct fix for the representability bug
+a default-`False` boolean created: `None` can no longer read as "not living" by default,
+because the column literally isn't `False` until someone provides evidence for `False`.
+
+**What R8 gates: the whole episode, not shots or claims scoped to one entity** — and it
+has to, because docs/POLICY.md enforces R8 at stage 1, before `shot_list` exists; there is
+no shot or claim to scope by at the point this gate fires. (POLICY.md's "Derived
+engineering requirements" table numbers its own rules independently of CLAUDE.md's
+R1–R7 — they collide on numbers without sharing content; "R8" here is POLICY.md's.)
+Concretely, clearing R8 means advancing `Episode.advance_to()` past the stage-1
+checkpoint, which a human does either by supplying evidenced `living_evidence` for the
+entity in question or by removing every `Claim` that cites it from the episode's claim
+selection — never by rendering everything except that entity's material; no such partial
+render exists or is proposed.
+
+Because `Entity` is subject-scoped (see above), this review work amortizes: once a
+subject's entities carry evidenced `living` values, every later episode drawn from that
+same subject inherits them for free, rather than re-clearing the same people each time.
+(Worth flagging, not solving: evidence can go stale in one direction only — someone
+verified `True` can later die, and nothing here re-checks that over time.)
+
+`image_rights=NONE` blocks that entity from stage 3 shot selection. Neither consuming
+check (R8's render block, the stage-3 shot-selection block) is built yet — these columns
+exist so they have somewhere to read from once they are.
 
 `adjudicated` is stored but purely descriptive for this pass — it isn't wired into
 `LegalRisk` scoring or anything else. What it should eventually gate is an open
@@ -1110,12 +1173,118 @@ question, not a decided one.
 **Known gap, not addressed here:** `Subject.living_persons_involved` and `Entity.living`
 are now two independent sources of truth for a closely related fact, and nothing keeps
 them in sync — a Subject could have `living_persons_involved=False` while one of its
-Entities has `living=True`, and nothing will catch that. Deliberately not wiring a
-cross-model computation (mirroring how `Subject.monetization_tier` is computed) in a
-stage-1-data-layer-only pass. Worth revisiting once something actually reads
-`Entity.living` for render gating.
+Entities has `living=True` (or an unreviewed `None`), and nothing will catch that.
+Deliberately not wiring a cross-model computation (mirroring how
+`Subject.monetization_tier` is computed) in a stage-1-data-layer-only pass. Worth
+revisiting once something actually reads `Entity.living` for render gating.
 
 **`ClaimEntity`** — join table (`claim_id`, `entity_id`), mirroring `ClaimSource`'s shape.
+
+### `EntityMatch` — persisted match decisions, per contributing source
+
+| field | type | notes |
+|---|---|---|
+| `entity_id` | FK Entity | |
+| `source_id` | FK Source | |
+| `identifying_span` | str | verbatim substring in that source identifying this entity |
+| `span_start`, `span_end` | int | located the same way `ClaimSource` locates `quoted_span` — a whitespace-normalized regex match against the source text, never a model-supplied offset |
+
+`UniqueConstraint(entity_id, source_id)` — one match per source per entity, same
+reasoning as "exactly one `ClaimSource` per claim" above.
+
+This replaces "trust the model's merge decision" with "every source's contribution to an
+entity's identity is independently inspectable" — including the entity's *founding*
+source, which a "no silent merge" rule implicitly exempts by treating creation as
+safe-by-default and merging as the only risky operation. A wrong match baked in at
+creation — two different real people folded into one `Entity` row because a second
+source's mention was believed to be the first source's person — produces the identical
+wrong-identity outcome as a bad merge, and today nothing records why that belief was
+formed. `EntityMatch` closes that gap: every source that identifies a given entity gets
+its own row, located the same verifiable way `ClaimSource.quoted_span` already is.
+
+**Open problems, not solved here:**
+
+- **Order-dependence.** Resolution depends on processing sequence — a later source is
+  matched against whatever's already been decided, not jointly re-evaluated alongside
+  earlier ones. The same set of sources can plausibly assemble into a different entity
+  graph depending only on which one is processed first.
+- **Unbounded known-entity context.** Deciding "match an existing entity, or create a
+  new one" requires passing the subject's existing entity list (name plus identifying
+  detail) to the model in-prompt, and that list only grows as sources accumulate — no
+  compaction or summarization strategy exists, so both cost and eventual
+  context-window pressure grow with a subject's source count, unbounded.
+
+### Entity extraction — a separate pass, but downstream-coupled, not independent
+
+Not built yet. Proposed as its own module, the same shape as `claim_extraction.py` — but
+"separate" describes code organization, not a dependency-free pipeline stage. Unlike
+claim extraction, which needs nothing but a persisted `Source`, entity extraction's
+prompt needs the accumulated known-entity context described above, which only exists
+once prior sources for that subject have already gone through this same pass. Ordering —
+source → claim extraction → entity extraction, sequential across a subject's sources, not
+parallel — is load-bearing, not incidental: running it "independently" of claim
+extraction wouldn't just go untested, it would change what the pass can produce, because
+of the order-dependence problem above.
+
+**`force=True` on a `Source` that already has linked `Entity`/`ClaimEntity` rows:** same
+posture as `claim_extraction.py`'s own re-extraction semantics, exactly — never deletes
+or merges. A forced re-run adds a new batch of candidate `Entity`/`EntityMatch` rows
+alongside the existing ones, for a human to reconcile, since an existing `Entity` may
+already carry evidenced `living_evidence` or already be cited via `ClaimEntity` on a
+narratable, published claim. One consequence worse than the claims case, worth stating
+plainly: because entity resolution is *relational* — a match decision asserts two
+mentions are the same person — a second forced batch can disagree with the first about
+entity **boundaries**, not just about which claims exist. Batch 1 might fold two sources
+into one `Entity`; batch 2, same sources, a non-deterministic model run, might split them
+into two. Reconciling that is not "pick the better candidate from two claims about the
+same fact" the way duplicate `Claim` batches are — it's reconciling two different graphs
+over the same sources. Flagging this now, same posture as the batch-accumulation gap
+already recorded for claims; not solved here.
+
+**Token cost: roughly 2x input tokens per call, not "2x calls at claim extraction's
+size."** Claim extraction's input is the source text. Entity extraction's input is the
+source text *plus* the full known-entity context needed for match-or-new decisions — so
+each individual call costs more input tokens than the equivalent claim-extraction call
+over the same source, before it's even counted as a second pass. And because that
+context is exactly the unbounded-growth object above, "roughly 2x" is a lower bound that
+only holds early in a subject's life — it gets worse, not flat, as sources accumulate.
+
+`image_rights` is omitted from the entity-extraction provider's structured-output schema
+entirely — the model is never asked for it, the same treatment `narratable` already gets
+from claim extraction. A source's text can establish who someone is and what they did;
+it cannot establish who owns the copyright to a photo of them, or whether we're licensed
+to use one — that's an asset-side fact (CLAUDE.md's R6, `AssetStore`/`LicenseType`), not
+a text-extraction fact.
+
+### `image_rights`: copyright is not right-to-depict
+
+`image_rights` (`PUBLIC_DOMAIN`/`LICENSED`/`NONE`) speaks to exactly one axis: who owns
+the copyright to an image asset. Whether we're legally permitted to *depict* a given
+person is a separate question, and this schema does not model it — recorded here as a
+gap, not papered over with one enum pretending to cover both.
+
+This is not a settled bar with a bright line, and it isn't solved by adding a field.
+Germany's Kunsturhebergesetz distinguishes consent-to-depict (§22) from a named exception
+for *Personen der Zeitgeschichte* — persons of contemporary history (§23) — which
+plausibly covers a meaningful share of this library's own subjects: a convicted defendant
+in a well-documented case sits close to the textbook case §23 exists for. But §23 has its
+own limits (a depicted person's legitimate countervailing interests under §23(2), and
+narrower scope for anyone not genuinely a public figure in connection with the reported
+events), and none of this is this project's call to make unilaterally. It's the same
+"qualified legal advice needed" territory docs/POLICY.md already names for living,
+non-adjudicated subjects — treat this paragraph as a flag for that advice, not a gate
+this schema enforces.
+
+KUG is also only one jurisdiction's regime, and this content publishes globally: a
+subject's own jurisdiction, the platform's jurisdiction, and the audience's jurisdiction
+can all differ, and each may apply its own right-of-publicity or personality-rights
+rules independent of KUG entirely. Nothing here attempts to reconcile that; naming it so
+the KUG discussion above doesn't get mistaken for the whole picture.
+
+See docs/POLICY.md's open questions for where this sits relative to CLAUDE.md's R6
+(asset licensing) and R7 (living persons and named individuals) — right-to-depict
+doesn't get a new requirement number, it folds conceptually into those two, without
+either currently having a dedicated field for it.
 
 ---
 
