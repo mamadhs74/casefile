@@ -46,32 +46,62 @@ For every claim, provide:
   substring, or if it is too long to read at a glance, the claim is
   discarded before it is ever used.
 - claim_type: exactly one of:
-  - "fact": a directly established fact about what happened, supported by
-    a primary or authoritative record.
-  - "contemporaneous_report": what a period source (e.g. a newspaper)
-    reported at the time, as distinct from an adjudicated fact. Prefer
-    this over "fact" for anything from a period news source, EVEN IF it is
-    phrased with total confidence and no hedging language -- newspapers
-    report, they do not adjudicate, and confident phrasing from a period
-    news source is not the same thing as an established fact.
+  - "fact": a directly established fact about what happened, or the
+    adjudicating court/tribunal's own determination, supported by a
+    primary or authoritative record.
+  - "contemporaneous_report": an assertion the source is reporting that
+    someone made -- a period source (e.g. a newspaper) reporting an event,
+    but just as much a party's argument, a witness's testimony, or an
+    official's allegation reported anywhere, including inside an
+    otherwise-authoritative document. The source establishes that the
+    statement was made, not that its content is true.
   - "inference": a conclusion you are drawing by connecting things stated
     in the source, rather than something the source states outright.
-  Never use any other value. If you are unsure which of these three
-  applies, choose the more cautious one in this order, least to most
-  confident: inference, contemporaneous_report, fact. Overstating
-  confidence is the worse mistake.
+  Never use any other value.
+
+  The most reliable signal is WHO is the subject of the verb, not the
+  verb alone or the source's tier:
+  - If the subject making the statement is a PARTY or WITNESS -- verbs
+    like argues, testified, alleged, claimed, contended, stated, said --
+    that is "contemporaneous_report", regardless of the source's tier.
+    Even a primary-record document reports party arguments and witness
+    testimony that are not thereby adjudicated facts just because the
+    document holding them is authoritative.
+  - If the subject is the COURT or TRIBUNAL itself -- verbs like holds,
+    finds, concludes, rules, orders, affirms, reverses -- that is "fact":
+    the court's own determination is the adjudicated record, not a report
+    of what someone else claimed.
+  Worked examples from a real appellate opinion:
+    "On appeal, Long argues the trial court abused its discretion..."
+      -> contemporaneous_report (Long is the subject; this is his
+         contention)
+    "...minor child testified that Long touched her..."
+      -> contemporaneous_report (the witness is the subject; this is
+         testimony, not an adjudicated fact)
+    "We hold the trial court did not abuse its discretion..."
+      -> fact (the court is the subject; this is the ruling itself)
+    "Antonio Long appeals his convictions for voluntary manslaughter..."
+      -> fact (a plain procedural statement -- an appeal was filed,
+         sentences were imposed -- not a contention by either party)
+
+  If you are still unsure after applying that check, choose the more
+  cautious of the two, in this order, least to most confident: inference,
+  contemporaneous_report, fact. Overstating confidence is the worse
+  mistake.
 - category: exactly one of "event", "person", "location", "timeline",
   "evidence", "legal_outcome" -- whichever the claim is primarily about.
 - date_anchor: an ISO 8601 date (YYYY-MM-DD) if the claim is clearly
   anchored to a specific date, otherwise null. Do not guess a date that
   is not actually supported by the text.
 
-You will be told the source's own tier (e.g. "primary_record",
-"contemporaneous", "retrospective", "unverified"). Use it as context for
-claim_type: an unattributed direct statement in a primary_record source
-leans "fact"; the same kind of statement in a contemporaneous or
-retrospective source leans "contemporaneous_report", because the source
-itself is reporting, not adjudicating.
+You will also be told the source's own tier (e.g. "primary_record",
+"contemporaneous", "retrospective", "unverified"). This is a second,
+independent check, not a replacement for the subject-of-the-verb check
+above: an unattributed direct statement in a primary_record source leans
+"fact"; the same kind of statement in a contemporaneous or retrospective
+source leans "contemporaneous_report", because the source itself is
+reporting, not adjudicating. Apply both checks -- tier does not override
+who is actually making the statement within the text.
 
 Do not invent claims not supported by the text. If the source has no
 extractable factual content, return an empty list. Do not pad the list to

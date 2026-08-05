@@ -836,6 +836,32 @@ correctly-quoted passage assigned the wrong epistemic status. Worth spot-checkin
 sample of real extraction output against a paid frontier model before trusting this at
 volume — not done as part of this piece.
 
+**This risk materialized on the first real run, and was fixed with a prompt change, not
+a validation change.** Against `source_5` (the real court-opinion PDF), the model
+flattened a party's argument ("On appeal, Long argues...") and a witness's testimony
+("...minor child testified that...") to `fact`, correctly keeping the court's own
+holdings ("We hold...") and plain procedural statements as `fact`. The prompt's original
+tier-based guidance didn't help, because it targets a different problem — how much to
+trust the *source document* as a whole — while this error was about content *inside* an
+authoritative document. Fixed by adding a subject-of-the-verb check to
+`_SYSTEM_INSTRUCTION` (`gemini_provider.py`): a party or witness as the subject
+(argues, testified, alleged, claimed) is `contemporaneous_report` regardless of the
+source's tier; the court itself as the subject (holds, finds, rules) is `fact`. Includes
+worked examples drawn from the real document, since abstract instructions were
+insufficient the first time.
+
+**Checked for non-determinism, not assumed stable.** Ran `source_5` extraction twice
+after the fix, `--force`, no other change between runs. Every passage the model
+extracted in *both* runs got the identical `claim_type` both times, including both
+previously-misclassified ones (the argument and the testimony both landed
+`contemporaneous_report` in both runs; both court holdings stayed `fact` in both). The
+only variation between runs was in *candidate selection* — the filing-date claim was
+proposed in one run and not the other — not in classification of a passage once
+selected. Recording this explicitly because "we checked for non-determinism and it held"
+is exactly the kind of claim that gets assumed true later without ever having been
+verified; here it was verified, on this date, on this source, and this is what running
+it twice actually showed.
+
 **Re-extraction of a `Source` that already has any linked `Claim` is a no-op unless
 `force=True`.** Extraction is not deterministic — the same source run twice will not
 produce the same claims — and a prior claim may already be `narratable=True` and cited
@@ -843,6 +869,19 @@ by a published episode's `EpisodeClaim`. `force=True` never deletes or merges; i
 second batch of candidate claims alongside the first, for a human to reconcile.
 Resolving overlap between batches is a review job, the same posture as every other place
 this system refuses to auto-correct instead of raising or asking.
+
+**Known gap, real now, not hypothetical: iterating on the prompt this way accumulates
+batches with no cleanup path.** Validating the whitespace-matching fix and then the
+claim_type prompt fix against the same real source (`source_id=5`) — each a legitimate
+reason to re-run — left it with **4 separate batches and 17 total claims** for what a
+reviewer actually wants to see as one clean set. Nothing in this system deletes,
+supersedes, or marks a batch as superseded by a later one; every batch just accumulates
+next to the others, correct ones and since-fixed ones alike, and a human has to reconcile
+them by hand with no tooling to help. This is exactly the design tradeoff described
+above (never auto-delete or auto-merge, because a claim might already be cited) — it's
+the right tradeoff for a claim already in use, but it has a real cost during ordinary
+prompt iteration that nothing currently mitigates. Not building a fix now; recording that
+one is needed once this moves past one-off manual validation runs.
 
 **Exactly one `ClaimSource` per claim.** A claim built from two different sources is
 out of scope for this module — the many-to-many `ClaimSource` table can represent it
