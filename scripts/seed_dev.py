@@ -322,14 +322,33 @@ def seed() -> None:
         for claim in claims:
             session.refresh(claim)
 
+        # quoted_span/span_start/span_end are illustrative here, not derived
+        # from real source text -- seed_dev.py hand-authors Claim rows
+        # directly rather than running the extraction pipeline against
+        # meridian_primary/meridian_contemporaneous/meridian_retrospective's
+        # actual text_path content.
         session.add_all(
             [
-                ClaimSource(claim_id=departure_claim.id, source_id=meridian_primary.id),
                 ClaimSource(
-                    claim_id=inquiry_opened_claim.id, source_id=meridian_contemporaneous.id
+                    claim_id=departure_claim.id,
+                    source_id=meridian_primary.id,
+                    quoted_span="departed Southampton",
+                    span_start=0,
+                    span_end=20,
                 ),
                 ClaimSource(
-                    claim_id=cold_war_speculation_claim.id, source_id=meridian_retrospective.id
+                    claim_id=inquiry_opened_claim.id,
+                    source_id=meridian_contemporaneous.id,
+                    quoted_span="an Admiralty inquiry was opened",
+                    span_start=0,
+                    span_end=32,
+                ),
+                ClaimSource(
+                    claim_id=cold_war_speculation_claim.id,
+                    source_id=meridian_retrospective.id,
+                    quoted_span="Cold War intelligence speculation",
+                    span_start=0,
+                    span_end=34,
                 ),
             ]
         )

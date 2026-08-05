@@ -19,7 +19,6 @@ from packages.db.listeners import NarratableSourcingError, NonNarratableClaimErr
 from packages.db.models import (
     Claim,
     ClaimEntity,
-    ClaimSource,
     Entity,
     EpisodeClaim,
     Source,
@@ -28,6 +27,7 @@ from packages.db.models import (
 from packages.domain.enums import SourceTier
 from tests.factories import (
     make_claim,
+    make_claim_source,
     make_entity,
     make_episode,
     make_source,
@@ -77,7 +77,7 @@ def test_claim_becomes_narratable_with_a_tier_a_source(session: Session, strateg
     subject_id = _persist(session, make_subject(strategy_id))
     claim_id = _persist(session, make_claim(subject_id))
     source_id = _persist(session, make_source(subject_id, tier=SourceTier.PRIMARY_RECORD))
-    session.add(ClaimSource(claim_id=claim_id, source_id=source_id))
+    session.add(make_claim_source(claim_id, source_id))
     session.commit()
 
     claim = session.get(Claim, claim_id)
@@ -111,7 +111,7 @@ def test_claim_cannot_become_narratable_with_a_tier_b_source(
     subject_id = _persist(session, make_subject(strategy_id))
     claim_id = _persist(session, make_claim(subject_id))
     source_id = _persist(session, make_source(subject_id, tier=SourceTier.RETROSPECTIVE))
-    session.add(ClaimSource(claim_id=claim_id, source_id=source_id))
+    session.add(make_claim_source(claim_id, source_id))
     session.commit()
 
     claim = session.get(Claim, claim_id)
@@ -136,8 +136,8 @@ def test_claim_with_one_tier_b_and_one_tier_a_source_cannot_be_narratable(
     tier_b_id = _persist(
         session, make_source(subject_id, url="https://b.com/1", tier=SourceTier.BOOK)
     )
-    session.add(ClaimSource(claim_id=claim_id, source_id=tier_a_id))
-    session.add(ClaimSource(claim_id=claim_id, source_id=tier_b_id))
+    session.add(make_claim_source(claim_id, tier_a_id))
+    session.add(make_claim_source(claim_id, tier_b_id))
     session.commit()
 
     claim = session.get(Claim, claim_id)
@@ -161,7 +161,7 @@ def test_cannot_attach_tier_b_source_to_already_narratable_claim(
     subject_id = _persist(session, make_subject(strategy_id))
     claim_id = _persist(session, make_claim(subject_id))
     tier_a_id = _persist(session, make_source(subject_id, tier=SourceTier.PRIMARY_RECORD))
-    session.add(ClaimSource(claim_id=claim_id, source_id=tier_a_id))
+    session.add(make_claim_source(claim_id, tier_a_id))
     session.commit()
     claim = session.get(Claim, claim_id)
     assert claim is not None
@@ -174,7 +174,7 @@ def test_cannot_attach_tier_b_source_to_already_narratable_claim(
     )
 
     with pytest.raises(NarratableSourcingError):
-        session.add(ClaimSource(claim_id=claim_id, source_id=tier_b_id))
+        session.add(make_claim_source(claim_id, tier_b_id))
         session.commit()
 
 
@@ -184,7 +184,7 @@ def test_can_attach_another_tier_a_source_to_narratable_claim(
     subject_id = _persist(session, make_subject(strategy_id))
     claim_id = _persist(session, make_claim(subject_id))
     first_id = _persist(session, make_source(subject_id, tier=SourceTier.PRIMARY_RECORD))
-    session.add(ClaimSource(claim_id=claim_id, source_id=first_id))
+    session.add(make_claim_source(claim_id, first_id))
     session.commit()
     claim = session.get(Claim, claim_id)
     assert claim is not None
@@ -195,7 +195,7 @@ def test_can_attach_another_tier_a_source_to_narratable_claim(
     second_id = _persist(
         session, make_source(subject_id, url="https://c.gov/1", tier=SourceTier.CONTEMPORANEOUS)
     )
-    session.add(ClaimSource(claim_id=claim_id, source_id=second_id))
+    session.add(make_claim_source(claim_id, second_id))
     session.commit()  # must not raise
 
 
@@ -210,7 +210,7 @@ def test_cannot_remove_last_source_from_narratable_claim(
     subject_id = _persist(session, make_subject(strategy_id))
     claim_id = _persist(session, make_claim(subject_id))
     source_id = _persist(session, make_source(subject_id, tier=SourceTier.PRIMARY_RECORD))
-    link = ClaimSource(claim_id=claim_id, source_id=source_id)
+    link = make_claim_source(claim_id, source_id)
     session.add(link)
     session.commit()
     claim = session.get(Claim, claim_id)
@@ -233,9 +233,9 @@ def test_can_remove_a_non_last_source_from_narratable_claim(
     second_id = _persist(
         session, make_source(subject_id, url="https://c.gov/1", tier=SourceTier.CONTEMPORANEOUS)
     )
-    first_link = ClaimSource(claim_id=claim_id, source_id=first_id)
+    first_link = make_claim_source(claim_id, first_id)
     session.add(first_link)
-    session.add(ClaimSource(claim_id=claim_id, source_id=second_id))
+    session.add(make_claim_source(claim_id, second_id))
     session.commit()
     claim = session.get(Claim, claim_id)
     assert claim is not None
@@ -259,7 +259,7 @@ def test_cannot_downgrade_tier_of_source_cited_by_narratable_claim(
     subject_id = _persist(session, make_subject(strategy_id))
     claim_id = _persist(session, make_claim(subject_id))
     source_id = _persist(session, make_source(subject_id, tier=SourceTier.PRIMARY_RECORD))
-    session.add(ClaimSource(claim_id=claim_id, source_id=source_id))
+    session.add(make_claim_source(claim_id, source_id))
     session.commit()
     claim = session.get(Claim, claim_id)
     assert claim is not None
@@ -309,7 +309,7 @@ def test_episode_claim_accepts_narratable_claim(session: Session, strategy_id: i
     subject_id = _persist(session, make_subject(strategy_id))
     claim_id = _persist(session, make_claim(subject_id))
     source_id = _persist(session, make_source(subject_id, tier=SourceTier.PRIMARY_RECORD))
-    session.add(ClaimSource(claim_id=claim_id, source_id=source_id))
+    session.add(make_claim_source(claim_id, source_id))
     session.commit()
     claim = session.get(Claim, claim_id)
     assert claim is not None

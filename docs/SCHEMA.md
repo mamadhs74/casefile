@@ -445,6 +445,22 @@ expensive an IP ban from a source you need would be, erring toward caution on th
 ambiguous case is the right tradeoff even though it means a flaky robots.txt endpoint
 can stall an otherwise-fine fetch.
 
+**Bug found and fixed on the fetch layer's first live run against real sites:**
+`RobotsCache._fetch_and_parse()` fetched `robots.txt` without ever passing the
+configured `User-Agent` header, so it went out as bare `python-httpx/0.28.x` — a
+different identity than the real content `GET` in `fetch.py`, which has always set the
+header correctly. `en.wikipedia.org` returned `HTTP 403` on that unauthenticated-looking
+robots.txt request specifically, which `RobotsUnreachableError`'s conservative-skip
+behavior then (correctly, given what it saw) treated as "don't fetch." Confirmed by
+reproducing the 403 through the real code path, inspecting `httpx.AsyncClient`'s default
+header set, and confirming the fetch succeeds once the robots.txt request carries the
+same `User-Agent` the content request already does — no change to the UA string itself
+was needed. Fixed with one line: `robots.py`'s request now passes
+`headers={"User-Agent": self._user_agent}`, matching `fetch.py`. `DEFAULT_USER_AGENT`
+remains a generic placeholder per its own docstring — still worth a real contact URL
+before fetching at scale — but that's a separate, pre-existing item, not what caused
+today's failure.
+
 **`derive_domain()` moved to `packages/domain/urls.py`**, shared between
 `packages/db/listeners.py` (Source.domain derivation) and `packages/research/`
 (blocklist checks, rate limiting). It was a private, duplicated function before;
@@ -558,6 +574,45 @@ error text (a very plausible outcome — many error pages are served by a CDN or
 layer entirely separate from the origin site's actual homepage) slips through
 untouched. No further check exists for this today.
 
+### Product-level finding: Tier A material may not exist on the open web for the cases this strategy targets
+
+`SourceFetcher.fetch_source()` was run for the first time against five real, live
+URLs, chosen to span the shapes docs/SOURCING.md describes: a Wikipedia reference
+article, two long-form true-crime retrospectives, and two real court-opinion PDFs
+(fetched purely to exercise the PDF path and stress-test length — unrelated modern
+cases, not connected to any real subject). All five fetched successfully once the
+robots.txt bug above was fixed. Word counts ranged 989–4,006, confirming the fetch and
+extraction layers work correctly end to end against real sites and real PDFs, not just
+the synthetic fixtures in `tests/test_fetch.py` / `tests/test_extraction.py`.
+
+**None of the five is Tier A.** The two retrospectives are Tier B at best (blog/media
+content, not primary or contemporaneous record); Wikipedia is `REFERENCE`, explicitly
+barred from ever being a claim's source per docs/SOURCING.md; the two court PDFs are
+real primary records, but for an unrelated present-day case, used only as length
+fixtures. For the actual subject this run targeted — a 1922 Bavarian farmstead
+murder — Tier A means the original German-language police and inquest records. Those
+are very unlikely to be sitting on the open web at a fetchable URL at all: a
+hundred-year-old rural German criminal investigation's primary paperwork is the kind of
+material that lives in a Bavarian state or district archive, not indexed by a search
+engine, not scanned and hosted anywhere `SourceFetcher` can reach with a URL.
+
+**This is the same shape of problem `experiments/slice_01/FINDINGS.md`'s "archival
+photo resolution is a real ceiling" finding identified for imagery**, one layer over:
+that finding is about *usable resolution* for a well-documented old case;
+this one is about *fetchable existence* for its primary sourcing. Both say the same
+thing about "well-documented" as this strategy's median case, not its edge case —
+the record survives, but not always in a form this pipeline's automation can reach on
+its own. `SourceFetcher` is not the gap; it worked exactly as designed against every
+URL it was given. The gap is upstream of fetching: **subject selection needs to weigh
+whether Tier A material is realistically obtainable by URL at all**, not just whether a
+case is well-documented and legally resolved. A case whose only surviving Tier A record
+is a physical archive box requires either a research step this pipeline doesn't have
+yet (a real records request, or a researcher transcribing/scanning it by hand and
+feeding the result in as a `Source` some other way than `fetch_source()`), or it isn't
+actually eligible for R1's gate no matter how much retrospective writing exists about
+it. Not a bug to fix in the fetch layer — a criterion missing from how subjects get
+chosen in the first place.
+
 ---
 
 ## Claim, ClaimSource
@@ -614,7 +669,8 @@ those. If strict chronological sorting is ever needed (e.g. for the `chronologic
 episode architecture below), add a separate nullable `sort_date` alongside this rather
 than tightening it.
 
-**`ClaimSource`** — join table (`claim_id`, `source_id`), renamed from `FactSource`.
+**`ClaimSource`** — join table (`claim_id`, `source_id`), renamed from `FactSource`, plus
+`quoted_span`, `span_start`, `span_end` (all `NOT NULL`) — see "Claim extraction" below.
 
 ### The narratable invariant
 
@@ -655,6 +711,113 @@ guarantees, not raw-SQL-proof triggers. A direct `sqlite3` write against the `.d
 bypasses all five listeners, the same way it would bypass `Subject`'s scoring or
 `Source`'s domain derivation. Nothing here changes that trust model, it just applies it
 to a new invariant.
+
+### Claim extraction (`packages/research/claim_extraction.py`)
+
+Turns a persisted `Source`'s text into `Claim`/`ClaimSource` rows. Every claim it
+creates is `narratable=False` — set explicitly in this code, not just relied on from the
+`Claim.before_insert` listener above, same belt-and-suspenders posture as everywhere
+else in this layer.
+
+**Provider interface, deliberately minimal.**
+`packages/research/llm_provider.py` defines one `Protocol`
+(`ClaimExtractionProvider`, a single `extract_claims(source_text, source_tier) ->
+list[ProposedClaim]` method) and nothing else calls a provider SDK directly.
+`packages/research/gemini_provider.py` is the one implementation today, using Google AI
+Studio's free tier — no API credit purchased yet, the 1M-token context window takes a
+long filing in one call, structured output against a JSON schema is supported, and it
+costs nothing while the project isn't yet paying for inference. Free-tier providers have
+a documented history of silently deleting or replacing models, which is exactly why this
+is behind an interface at all: swapping to a paid provider later, if the free tier
+disappears or the quality bar needs to move, is a new class satisfying the same
+`Protocol` plus a config change — not a rewrite of `claim_extraction.py`. One interface,
+one implementation; not built out further than that until a second implementation
+actually needs more.
+
+**Verifiability: verbatim quote, located by code, not emitted by the model.** The
+model returns `quoted_span` — a claimed verbatim copy of the exact passage supporting
+its assertion — never a character offset; asking a model for raw character positions in
+arbitrary-length text isn't something LLMs can do reliably. `claim_extraction.py` then
+locates that string in the source text via an **exact substring search, no whitespace
+normalization**, and computes `span_start`/`span_end` from the match. A quote that
+isn't found verbatim is rejected before persistence, unconditionally. This is the
+primary defense against a hallucinated citation, and it matters more with a smaller
+free-tier model, not less — a smaller model is more likely to paraphrase, embellish, or
+invent a citation than a frontier one, and this check is exactly what catches it.
+Located spans over `MAX_QUOTED_SPAN_CHARS` (800) are also rejected — a "supporting
+passage" longer than that isn't something a reviewer can check in seconds, which is the
+entire point of storing it.
+
+**This makes citations structurally verifiable, not semantically verifiable — and
+that boundary matters more than it sounds.** The mechanism proves a claim's quote
+provably exists, verbatim, where the claim says it does. It cannot and does not prove
+that the claim actually follows from that quote — a citation can point at a real
+passage and still draw the wrong conclusion from it, and no automated check here catches
+that. That's a human's job at review time, not something this system does for them. Worth
+stating plainly because it's easy to later assume the offset mechanism buys more safety
+than it does.
+
+**`claim_type` is constrained to `{FACT, CONTEMPORANEOUS_REPORT, INFERENCE}` at the
+provider's own structured-output schema** — `DISPUTED` is never a valid extraction
+output (defensively re-checked in `claim_extraction.py` too, in case a provider's schema
+enforcement is ever weaker than expected). A single source's text cannot establish that
+sources *disagree*; that requires comparing claims across sources, which is
+`reconcile_facts`' job (CLAUDE.md's pipeline diagram) — a stage that doesn't exist yet.
+The prompt also passes `source.tier` as plain-language context, and instructs the model
+to prefer the more cautious classification when unsure, in this order least-to-most
+confident: inference, contemporaneous_report, fact. Text alone systematically
+over-classifies confidently-worded period reporting as `FACT`; a newspaper's unhedged
+sentence is still a report, not an adjudicated fact, and the source's own tier is what
+lets the model apply that asymmetry.
+
+**`confidence` is derived mechanically from `claim_type`, not asked of the model as a
+second free choice:** `FACT → ESTABLISHED`, `CONTEMPORANEOUS_REPORT → REPORTED`,
+`INFERENCE → REPORTED`. SOURCING.md's `type` and `confidence` fields read as if they
+vary independently, but `type: disputed` and `confidence: contested` both describe the
+same underlying situation — sources disagreeing — which extraction can't observe from
+one source's text any more than it can observe `DISPUTED`. Fixing the mapping shrinks
+the model's judgment surface by one axis instead of asking it to keep two overlapping
+fields consistent; `CONTESTED` (like `DISPUTED`) is reserved for the same future
+reconciliation stage.
+
+**Known risk: `claim_type` classification quality with a free-tier model.** This is the
+single field SOURCING.md says matters most — "most of what separates responsible true
+crime from the rest" — and it's also the judgment call most sensitive to model
+capability: distinguishing an adjudicated fact from confidently-worded period reporting
+from a reasonable inference is a nuanced call, and a smaller free-tier model is the most
+likely place in this whole pipeline for that judgment to be wrong in the dangerous
+direction (`CONTEMPORANEOUS_REPORT` or `INFERENCE` misclassified as `FACT`). The
+verbatim-quote check catches a hallucinated *citation*; it does not catch a real,
+correctly-quoted passage assigned the wrong epistemic status. Worth spot-checking a
+sample of real extraction output against a paid frontier model before trusting this at
+volume — not done as part of this piece.
+
+**Re-extraction of a `Source` that already has any linked `Claim` is a no-op unless
+`force=True`.** Extraction is not deterministic — the same source run twice will not
+produce the same claims — and a prior claim may already be `narratable=True` and cited
+by a published episode's `EpisodeClaim`. `force=True` never deletes or merges; it adds a
+second batch of candidate claims alongside the first, for a human to reconcile.
+Resolving overlap between batches is a review job, the same posture as every other place
+this system refuses to auto-correct instead of raising or asking.
+
+**Exactly one `ClaimSource` per claim.** A claim built from two different sources is
+out of scope for this module — the many-to-many `ClaimSource` table can represent it
+(one row per supporting source, each with its own span), but nothing here writes more
+than one, because that kind of synthesis is reconciliation's job, not a single-source
+extraction pass's.
+
+**Failure modes:** an extraction returning zero claims is valid (a source can genuinely
+have no extractable facts) but flagged for operator attention, not raised, when the
+source is Tier A — a Tier A source producing nothing is more surprising than a Tier B
+one. A truncated model response (an unusually claim-dense source hitting the output-
+token ceiling) gets exactly one retry at a higher ceiling before the whole extraction
+attempt for that source fails cleanly, with nothing partial persisted.
+
+`scripts/extract_claims.py` runs extraction against a single `Source` at a time — no
+batch/queue mode, deliberately: there's no job queue wired up yet, and the first real
+run against a real Gemini response is exactly the point a human should look at output
+before it touches more than one row. Supports `--dry-run` (runs every validation step,
+persists nothing) and `--force`.
 
 ---
 

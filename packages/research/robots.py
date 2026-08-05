@@ -67,7 +67,11 @@ class RobotsCache:
     ) -> urllib.robotparser.RobotFileParser | None:
         robots_url = f"{scheme}://{host}/robots.txt"
         try:
-            response = await self._client.get(robots_url, timeout=ROBOTS_FETCH_TIMEOUT_S)
+            response = await self._client.get(
+                robots_url,
+                timeout=ROBOTS_FETCH_TIMEOUT_S,
+                headers={"User-Agent": self._user_agent},
+            )
         except httpx.HTTPError as exc:
             raise RobotsUnreachableError(host, str(exc)) from exc
 

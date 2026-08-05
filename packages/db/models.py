@@ -213,11 +213,27 @@ class Claim(TimestampedModel, table=True):
 
 
 class ClaimSource(TimestampedModel, table=True):
+    """quoted_span/span_start/span_end are the verifiability mechanism --
+    see docs/SCHEMA.md's claim-extraction section. quoted_span is a
+    verbatim (exact-substring) copy of the passage in this source's text
+    that supports the claim; span_start/span_end are its character
+    offsets in that text, computed by locating quoted_span, not emitted
+    by a model. All three are required: this system's whole point is
+    that a reviewer can see claim and supporting passage side by side in
+    seconds, and that only holds if every ClaimSource carries one. This
+    makes citations structurally verifiable -- the quote provably exists
+    where claimed -- but not semantically verifiable -- that the claim
+    actually follows from it. That second check is a human's job.
+    """
+
     __tablename__ = "claim_source"
     __table_args__ = (UniqueConstraint("claim_id", "source_id", name="uq_claim_source"),)
 
     claim_id: int = Field(foreign_key="claim.id", index=True)
     source_id: int = Field(foreign_key="source.id", index=True)
+    quoted_span: str
+    span_start: int
+    span_end: int
 
 
 class Entity(TimestampedModel, table=True):

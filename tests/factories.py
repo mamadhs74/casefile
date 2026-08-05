@@ -7,6 +7,7 @@ from typing import Any
 from packages.db.models import (
     Channel,
     Claim,
+    ClaimSource,
     Entity,
     Episode,
     Source,
@@ -120,6 +121,23 @@ def make_claim(subject_id: int, **overrides: Any) -> Claim:
     )
     defaults.update(overrides)
     return Claim(**defaults)
+
+
+def make_claim_source(claim_id: int, source_id: int, **overrides: Any) -> ClaimSource:
+    # quoted_span/span_start/span_end are NOT NULL -- see ClaimSource's
+    # docstring. These defaults are an arbitrary but internally
+    # consistent span; tests that care about the actual values pass
+    # overrides.
+    quoted_span = overrides.pop("quoted_span", "a verbatim test quote")
+    defaults: dict[str, Any] = dict(
+        claim_id=claim_id,
+        source_id=source_id,
+        quoted_span=quoted_span,
+        span_start=0,
+        span_end=len(quoted_span),
+    )
+    defaults.update(overrides)
+    return ClaimSource(**defaults)
 
 
 def make_entity(subject_id: int, **overrides: Any) -> Entity:
