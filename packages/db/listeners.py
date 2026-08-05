@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import tldextract
 from sqlalchemy import event, func
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Mapper
@@ -26,19 +25,8 @@ from sqlmodel import select
 import packages.strategies.criminal_cases  # noqa: F401  registers the criminal-cases strategy
 from packages.db.models import Claim, ClaimSource, EpisodeClaim, Source, Strategy, Subject
 from packages.domain.enums import TIER_A_SOURCE_TIERS
+from packages.domain.urls import derive_domain
 from packages.research.dispatch import UnknownStrategyError, score_subject, validate_attributes
-
-# suffix_list_urls=() disables tldextract's live fetch of the Public Suffix
-# List, so domain derivation never makes a network call and is deterministic
-# in tests and CI -- it uses the snapshot bundled with the package.
-_extract = tldextract.TLDExtract(suffix_list_urls=())
-
-
-def _derive_domain(url: str) -> str:
-    extracted = _extract(url)
-    if extracted.suffix:
-        return f"{extracted.domain}.{extracted.suffix}".lower()
-    return extracted.domain.lower()
 
 
 def _resolve_strategy_slug(connection: Connection, strategy_id: int) -> str:
@@ -73,7 +61,7 @@ def _validate_and_score_subject(
 @event.listens_for(Source, "before_insert")
 @event.listens_for(Source, "before_update")
 def _derive_source_domain(mapper: Mapper[Any], connection: Connection, target: Source) -> None:
-    target.domain = _derive_domain(target.url)
+    target.domain = derive_domain(target.url)
 
 
 # --------------------------------------------------------------------------

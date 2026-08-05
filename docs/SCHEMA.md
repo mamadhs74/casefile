@@ -367,6 +367,197 @@ strategy unchanged; only the numeric thresholds vary, read from the subject's ow
 `Strategy` row (see "Strategy" above for why thresholds are data while eligibility
 scoring is code). Returns structured failure reasons, not a bare bool.
 
+### Fetch layer (`packages/research/fetch.py`)
+
+`SourceFetcher.fetch_source()` retrieves a URL and persists a `Source` row. Async
+throughout (`httpx.AsyncClient`), matching docs/ARCHIVE-SPEC.md's established pattern
+for the sibling archive-retrieval package — but not wired into a job queue. `Job`
+exists as a table; no worker process reads it yet, so this is a plain awaitable
+anything can call directly.
+
+**Order is deliberate, not incidental:**
+
+1. **Tier C blocklist** (`packages/research/tiering.py`) — checked before any network
+   request at all, including robots.txt. docs/SOURCING.md: Tier C sources are "never
+   read, never ingested," not merely excluded after the fetch. A `frozenset[str]` of
+   domains, checked via the same `derive_domain()` used everywhere else (now shared
+   in `packages/domain/urls.py` rather than duplicated — see below). Starts sparse,
+   expected to grow from real rejections the same way docs/ARCHIVE-SPEC.md describes
+   growing its license-fixtures file. Code-reviewed, not runtime-editable.
+2. **Idempotent `(subject_id, url)` check** — refetching a URL already fetched for
+   this subject returns the existing row, no new request.
+3. **robots.txt**, cached per exact host (not the collapsed registrable domain —
+   robots.txt is a per-origin document under RFC 9309), **then rate limiting**
+   (`packages/research/rate_limit.py`, a generic per-domain minimum-interval throttle
+   keyed on the collapsed domain — unlike docs/ARCHIVE-SPEC.md's five hand-written
+   per-provider adapters, source fetching hits arbitrary operator-supplied domains,
+   so it can't be a fixed table), **then the HTTP GET** (retry with backoff on
+   429/5xx only, matching docs/ARCHIVE-SPEC.md; no retry on other 4xx).
+4. **Extraction** (`packages/research/extraction.py`) — HTML via `trafilatura`, PDF
+   via `pypdf`, content-type sniffed with a magic-bytes fallback. Raises
+   `EmptyExtractionError` before anything is persisted if the result is below 25
+   words. **This ordering is load-bearing:** archival court records and inquest
+   reports are very often scans with no text layer, and without rejecting empty
+   extraction *first*, two such failures (two different scans, both extracting to
+   `""`) would both hash to `sha256("")` and collide against the constraint below —
+   for the wrong reason, "identical empty content," not "identical real content."
+5. **Content-hash dedup** — `(subject_id, text_sha256)`, see `Source`'s own
+   `UniqueConstraint` below.
+6. **Tier assignment** (`packages/research/tiering.py`) — see below. Never Tier A.
+7. Extracted text is written to `data/cases/{subject_id}/sources/{text_sha256}.txt`,
+   then the `Source` row is persisted.
+
+**Tier assignment: heuristics may write Tier B or `UNVERIFIED`, never Tier A.** The
+risk is asymmetric — a source wrongly left at `UNVERIFIED` just sits as an
+unclassified lead until a researcher reviews it (harmless, that's Tier B's actual
+role even for something that later turns out to be Tier A). A source wrongly
+*auto*-assigned `PRIMARY_RECORD` or `CONTEMPORANEOUS` could let a bad source into a
+narratable claim, undoing the entire point of the five listeners on `Claim`.
+Concretely: a domain on `REFERENCE_DOMAINS` (Wikipedia, other reference wikis) is
+tagged `REFERENCE` automatically — detection here is unambiguous and the ceiling is
+Tier B regardless, so a wrong guess costs nothing. **Everything else defaults to
+`UNVERIFIED`, including `.gov`, court domains, and national archives** — a `.gov`
+domain can host a blog post about a case exactly as easily as the court filing
+itself, so domain alone never writes a Tier A value. Book-domain detection is
+deliberately left unautomated (murkier to detect reliably than Wikipedia; also
+defaults `UNVERIFIED`). Promoting a source to Tier A is a plain field update a
+researcher makes after review — nothing currently blocks that *upgrade* (only a
+*downgrade* away from Tier A while cited by a narratable claim is blocked, per
+`Claim`'s narratable invariant above).
+
+**`Source.text_sha256` is now unique per `(subject_id, text_sha256)`** — a hard DB
+constraint, not just the fetch layer's own pre-check (which exists too, and raises
+`DuplicateSourceContentError` naming the existing row rather than a raw
+`IntegrityError`). This isn't duplicate-waste prevention: a syndicated copy of the
+same article under a second URL would otherwise inflate `check_source_gate()`'s
+distinct-domain and verified-source counts, and that gate has monetization meaning —
+a gate passing when it shouldn't. `tests/factories.py::make_source` and
+`tests/test_api_sources.py::_source_payload` both derive their default
+`text_sha256` from `url` now rather than a fixed constant, for the same reason: a
+shared constant modeled something that can't happen, two sources with byte-identical
+content.
+
+**`robots.txt`, missing vs. unreachable, are different outcomes.** No `robots.txt` at
+all (404) is allow-all per RFC 9309. A `robots.txt` that fails to fetch for any other
+reason (timeout, 5xx, connection error) is treated conservatively —
+`RobotsUnreachableError`, the fetch is skipped, not assumed permitted. Given how
+expensive an IP ban from a source you need would be, erring toward caution on the
+ambiguous case is the right tradeoff even though it means a flaky robots.txt endpoint
+can stall an otherwise-fine fetch.
+
+**`derive_domain()` moved to `packages/domain/urls.py`**, shared between
+`packages/db/listeners.py` (Source.domain derivation) and `packages/research/`
+(blocklist checks, rate limiting). It was a private, duplicated function before;
+two independent implementations of "what counts as one domain" drifting apart would
+be a real bug, not a style nit — R1's gate counts distinct domains for independence.
+
+### Extraction specificity
+
+Word count alone is not a specificity check. The defect this section addresses is
+worse than a hash collision: an extraction failure that returns plausible-length,
+non-empty text can enter the corpus as a **valid-looking `Source` on its own, with no
+second fetch required to expose it** — `check_source_gate()` would count it, and
+nothing before this investigation would have caught it. Three concrete failure modes
+were tested directly against the installed `trafilatura` version, not reasoned about
+abstractly:
+
+1. **Nav/chrome fallback.** When `trafilatura` can't confidently identify a page's
+   main content (e.g. a scan-viewer page whose only real content is an `<img>` with
+   no text alternative), its documented behavior is to fall back to extracting
+   *something* — nav, header, and footer text — rather than return empty. Tested:
+   three different archive record pages (an inquest, a shipping notice, a probate
+   record) sharing one realistic site template extracted to **byte-identical
+   30-39-word text**, comfortably above the old 25-word floor.
+2. **Paywall stubs.** A no-teaser paywall (headline immediately followed by a
+   subscribe wall, common on some publications) extracted to text that was 25 of 27
+   words identical across two different articles, differing only by a two-word
+   headline — one template detail away from an exact collision.
+3. **A 200 response with a generic, well-formed error/placeholder page.** Tested: two
+   different fake domains serving the same "Service Temporarily Unavailable" page
+   extracted to byte-identical text, comfortably above even the raised 40-word floor.
+   This is structurally indistinguishable from a real short article — a heading plus
+   a prose paragraph inside a semantic content container — so it survives every
+   structural signal below. It's also the one case a purely lexical check can't touch:
+   the sentence *is* well-formed, grammatical English, it just isn't about anything.
+
+**Adopted:**
+
+- **`favor_precision=True`** on the HTML extraction call. Biases `trafilatura`
+  against returning content it isn't confident about. Tested against both nav-fallback
+  variants above (light and heavier template): **0 words**, correctly empty, would
+  now hit `EmptyExtractionError` at zero new code. Tested against a genuinely short,
+  real primary record (a one-paragraph court order, 30-34 words) and a normal
+  article: both unaffected, no substantive content lost. Does **not** catch the
+  error-page case (case 3) — confirmed directly, it went from 25 to 28 words, still
+  well-formed and non-empty, because `favor_precision` reasons about structural
+  confidence, not content semantics.
+- **`MIN_EXTRACTED_WORD_COUNT` raised from 25 to 40**, not higher. High enough to
+  reject most no-teaser paywall stubs outright. The binding constraint against going
+  higher is the same short court-order fixture (30-34 words) — a floor tuned to also
+  reliably catch heavier boilerplate would reject exactly the terse, legitimate Tier A
+  documents this system exists to be able to use. With `favor_precision` handling
+  nav-fallback structurally, the floor no longer has to do that job too.
+- **Per-domain reference-sample check** (`packages/research/boilerplate.py`,
+  `DomainSampleCache`). The only thing that touches case 3, and the strongest evidence
+  available for any of the three: on the first fetch from a new host, also fetch the
+  **domain root** (not a sibling record page — simpler to derive, and a homepage is
+  more likely to be pure chrome by construction), extract it the same way, and cache
+  its `text_sha256` — one extra fetch per new host, reusing `RobotsCache`'s exact
+  caching shape, not a network request per URL fetched. A target page whose extracted
+  text hashes identically to its domain's cached root sample raises
+  `LikelyBoilerplateError` rather than being persisted. A failed or empty reference
+  fetch degrades to "no reference for this host" silently — this check exists to
+  improve confidence, it must never block the fetch it's checking.
+
+  **Also checked, for free: already-persisted `Source` rows from the same domain,
+  across *all* subjects, not just the current one.** The per-subject dedup check
+  (`_find_by_hash`) only ever looks within one subject's own sources, so the same
+  template chrome recurring across two different subjects researching different cases
+  on the same domain would be invisible to it — this is exactly the gap a
+  domain-scoped (not subject-scoped) query closes, at the cost of one extra `SELECT`,
+  no extra network request.
+
+**Investigated and rejected:**
+
+- **Title/H1 overlap.** Has a blind spot exactly where the failure mode lives: in the
+  nav-fallback fixture, the page's `<title>` and `<h1>` *were* the generic site name —
+  the same text the fallback grabbed — so an overlap check would score this a strong
+  match, not a mismatch. This isn't a fixable edge case in the fixture; it's
+  structural. The sites most likely to produce a bare scan-viewer page with no text
+  alternative (older, low-budget government and court archive portals) are exactly
+  the sites least likely to have distinct per-record `<title>`/`<h1>` values —
+  SEO-quality titles and this failure mode are anti-correlated. Actively
+  counterproductive against case 3: title "Service Temporarily Unavailable" and a
+  body describing a service outage are *genuinely on-topic for each other*, which an
+  overlap check would score as a good match.
+- **Stopword ratio.** Tested directly: nav-fallback text scored **0.13**, real
+  article prose **0.39** — looked like a clean separator. But the short court-order
+  fixture scored **0.23**, closer to the nav-fallback end than to normal prose,
+  because legal and bureaucratic language is inherently more noun-and-term-dense than
+  narrative prose. The false-positive risk concentrates exactly on the register Tier A
+  documents are written in — a threshold that reliably excludes nav-fallback (0.13)
+  would sit dangerously close to, or above, real legal-document language (0.23).
+  Rejected for this reason, not a general objection to lexical heuristics. Recorded
+  here with the number so this isn't re-proposed without re-deriving the same
+  conflict.
+- **Link density.** The right idea in principle — nav menus are link-dense, article
+  prose isn't — but not computable from anything `trafilatura`'s public API exposes;
+  checked both the plain-text output and the lower-level `bare_extraction().body`
+  (an lxml tree), and link-tag boundaries are already stripped by the time either is
+  available. Getting real link density would mean a second, separate raw-HTML pass
+  reaching into `trafilatura`'s internal node selection rather than its public API —
+  fragile against version upgrades, for a signal `favor_precision` already covers via
+  a different mechanism. Not worth the coupling.
+
+**Known limitation, not solved:** case 3 (a 200 response with a generic error page) is
+**mitigated, not solved**. The domain-reference-sample check only catches it when the
+error page happens to match that domain's cached root sample, or an already-fetched
+`Source` from the same domain — both real, useful signals, neither exhaustive. A
+domain whose root page extracts to something different from a given broken page's
+error text (a very plausible outcome — many error pages are served by a CDN or WAF
+layer entirely separate from the origin site's actual homepage) slips through
+untouched. No further check exists for this today.
+
 ---
 
 ## Claim, ClaimSource

@@ -149,7 +149,19 @@ class Subject(TimestampedModel, table=True):
 
 
 class Source(TimestampedModel, table=True):
+    """A Tier B "syndicated copy at a second URL" and the original are the
+    same content by definition -- (subject_id, text_sha256) is unique so
+    that can't silently inflate R1's source-diversity gate, which has real
+    monetization meaning. Two byte-identical Source rows for one subject
+    is not duplicate-waste, it's a gate passing when it shouldn't.
+    packages/research/fetch.py checks this before ever attempting the
+    insert; this constraint is the backstop for every other write path.
+    """
+
     __tablename__ = "source"
+    __table_args__ = (
+        UniqueConstraint("subject_id", "text_sha256", name="uq_source_subject_text_sha256"),
+    )
 
     subject_id: int = Field(foreign_key="subject.id", index=True)
     url: str

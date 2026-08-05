@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from typing import Any
 
@@ -82,16 +83,22 @@ def make_channel(strategy_id: int, **overrides: Any) -> Channel:
 
 def make_source(subject_id: int, **overrides: Any) -> Source:
     # domain is derived from url by packages/db/listeners.py; not settable here.
+    # text_sha256 defaults to a hash of url, not a fixed value -- a shared
+    # constant here would model something impossible (two sources with
+    # byte-identical content), and Source.text_sha256 is now unique per
+    # (subject_id, text_sha256). Pass text_sha256 explicitly to test an
+    # actual collision.
+    url = overrides.get("url", "https://example.com/article")
     defaults: dict[str, Any] = dict(
         subject_id=subject_id,
-        url="https://example.com/article",
+        url=url,
         publisher="Example Publisher",
         title="An article",
         published_date=None,
         retrieved_at=datetime.now(UTC),
         tier=SourceTier.RETROSPECTIVE,
         text_path="/tmp/text.txt",
-        text_sha256="0" * 64,
+        text_sha256=hashlib.sha256(url.encode()).hexdigest(),
         word_count=500,
     )
     defaults.update(overrides)

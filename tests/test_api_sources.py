@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -28,13 +29,17 @@ def _subject_payload(**overrides: Any) -> dict[str, Any]:
 
 
 def _source_payload(**overrides: Any) -> dict[str, Any]:
+    # text_sha256 defaults to a hash of url, not a fixed value -- Source.
+    # text_sha256 is unique per (subject_id, text_sha256), and a shared
+    # constant here would model two sources with byte-identical content.
+    url = overrides.get("url", "https://www.bbc.co.uk/news/article-1")
     payload: dict[str, Any] = {
-        "url": "https://www.bbc.co.uk/news/article-1",
+        "url": url,
         "publisher": "BBC",
         "title": "An article",
         "tier": SourceTier.PRIMARY_RECORD.value,
         "text_path": "/tmp/text.txt",
-        "text_sha256": "0" * 64,
+        "text_sha256": hashlib.sha256(url.encode()).hexdigest(),
         "word_count": 500,
     }
     payload.update(overrides)
