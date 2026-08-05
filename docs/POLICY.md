@@ -137,6 +137,15 @@ Each of these is testable and should have a corresponding check in the pipeline.
 | R11 | Publish rate limiter per channel. Backfill batches are blocked by default. | stage 6 |
 | R12 | Each strategy publishes to its own channel set with its own visual and vocal identity. Templates are never shared across strategies. | config |
 
+**R8's scope, made explicit:** the gate blocks the whole episode, not shots or claims
+scoped to one entity, because it's enforced at stage 1 — before `shot_list` exists to
+scope by at all. Clearing it is an editorial act at that stage (supply evidence for the
+entity's living-or-deceased status, or drop every claim citing it from the episode's
+selection), never a partial render. docs/SCHEMA.md's `Entity.living` is a tri-state
+(`True` / `False` / `None` for unreviewed), not a defaulting boolean, specifically so an
+unreviewed entity can never silently read as cleared; R8 fires whenever `living IS NOT
+False`.
+
 ---
 
 ## 6. Open questions
@@ -149,6 +158,21 @@ Each of these is testable and should have a corresponding check in the pipeline.
 - Publicity rights and defamation exposure for living subjects are **separate from
   platform policy** and are not addressed in this document. Qualified legal advice
   needed before any episode covering a living, non-adjudicated subject.
+- **Right-to-depict is not the same gate as copyright, and it does not get its own
+  requirement number here.** `Entity.image_rights` (docs/SCHEMA.md) only ever answers a
+  copyright question — who owns an image asset. Whether we're permitted to *depict* a
+  real person is a second, jurisdiction-dependent question — Germany's
+  Kunsturhebergesetz §22 consent requirement and its §23 *Personen der Zeitgeschichte*
+  exception are one example, not the only regime that can apply once content publishes
+  globally — that this project does not resolve and is not attempting to encode as a
+  pipeline check. It folds conceptually into CLAUDE.md's R6 (asset licensing) and R7
+  (living persons and named individuals) rather than a new R-number here, because this
+  file's own R-list is specifically platform-monetization-policy-derived (see this
+  document's header), and right-to-depict is a legal/privacy exposure that exists
+  independent of any platform's monetization policy — the same reasoning that already
+  keeps this file's R-numbers from overlapping in meaning with CLAUDE.md's. Neither R6
+  nor R7 currently has a dedicated schema field for it; this is the same "qualified
+  legal advice needed" territory as the bullet above, not a settled bar.
 
 ---
 

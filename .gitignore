@@ -12,3 +12,4 @@ experiments/**/models/
 # slice experiment artifacts
 experiments/**/work/
 experiments/**/input/
+data/

@@ -1092,7 +1092,7 @@ a per-episode one** — see "What R8 gates" below.
 | `name` | str | |
 | `role` | EntityRole | |
 | `living` | bool \| None, **indexed**, default `None` | tri-state — see below. No role-based exception. |
-| `living_evidence_source_id` | FK Source \| None | source the living/deceased determination is drawn from |
+| `living_evidence_source_id` | FK Source \| None | source the living/deceased determination is drawn from — Tier A required (proposed, not enforced yet, see below) |
 | `living_evidence` | str \| None | verbatim span from that source, located by code — see below |
 | `living_evidence_span_start`, `living_evidence_span_end` | int \| None | |
 | `adjudicated` | bool | descriptive only, not wired into anything yet |
@@ -1134,11 +1134,20 @@ in `living_evidence_source_id`'s actual text and computes
 `quoted_span`. A reviewer typing "confirmed via obituary" with no located text is exactly
 the unverifiable assertion the fabrication/misattribution note above exists to rule out.
 
-**Enforced at the persistence layer, same shape as the `narratable` invariant:** `living`
-may only move away from `None` when a located `living_evidence` (source, span, offsets)
-accompanies the write in the same transaction. Setting `living` to either `True` or
-`False` with no evidence is rejected, not silently accepted — concluding someone is dead
-needs the same proof as concluding they're alive.
+**Not built: the invariant this needs at the persistence layer.** No code exists for
+this yet — same status as the R8 render check and the stage-3 `image_rights=NONE` block
+already flagged unbuilt elsewhere in this section. Proposed shape, mirroring the
+`narratable` invariant: `living` should only be allowed to move away from `None` when a
+located `living_evidence` (source, span, offsets) accompanies the write in the same
+transaction, rejecting an evidence-free `True`/`False` write rather than silently
+accepting it — and `living_evidence_source_id` should be required to resolve to a Tier A
+source (`PRIMARY_RECORD` or `CONTEMPORANEOUS`), the same `TIER_A_SOURCE_TIERS` bar the
+`narratable` invariant already holds a single sentence of narration to. An
+`UNVERIFIED`-sourced claim of death clearing R8 for a real living person would make this
+gate weaker than the sourcing standard for ordinary narration, and nothing about this
+determination is lower-stakes than that. Until this is built, nothing stops `living`
+being set with no evidence, or with evidence from any tier, at all — the column exists,
+the invariant protecting it does not.
 
 **R8's gate condition is `living IS NOT False`** — `True` and `None` both trigger review;
 only an evidenced `False` clears it. This is the direct fix for the representability bug
