@@ -977,6 +977,51 @@ those two either — only that the two interventions tried so far don't reach th
 Recording this as three-way, not as "H1" or "H2" — collapsing it into either would claim
 more than four data points across two passages actually support.
 
+**A third swap, chosen to control for length: the disputed note in place of the
+burned-dress example.** Same instruction, one variable, same source, two more runs.
+Picked specifically because it's shorter and more self-contained than the contradictory-
+testimony line, so a failure here can't be blamed on passage length or embeddedness the
+way it could for that one. Full table across all three swaps:
+
+```
+                            barn ex. (C)  barn ex. (D)  dress ex. (E)  dress ex. (F)  note ex. (G)  note ex. (H)
+barn/hayloft                report        report        report         report         report        report
+burned dress                --            --            report         report         report        --
+disputed note                --            --            --             --             --            --
+contradictory testimony     --            --            --             --             --            --
+```
+
+**The disputed note did not extract even as the literal demonstrated example — the
+cleanest negative result of the three swaps.** Barn/hayloft generalized past being the
+example; burned-dress needed demonstration but mostly worked once given it; the disputed
+note failed under the single most favorable condition tested. That's evidence the
+"named speaker" framing isn't the full explanation either, though: the worked example
+written for it followed the identical "He [Knowlton] did X" pattern as burned-dress and
+barn/hayloft, pronoun-referenced back to the same speaker two paragraphs up. What
+actually differs is that "the story of the note, its non-confirmation and importance to
+the case" doesn't state what was disputed — it's a compressed reference that assumes the
+reader already knows the note's content from elsewhere, where the other two passages
+name a concrete claim outright ("she wore the Bedford cord and burned it," "her being in
+the hay loft"). This may be a fourth explanation (the passage doesn't state enough for a
+concrete assertion to be built from it) sitting alongside the original two, not proof the
+speaker hypothesis was wrong — three swaps on one document can't separate them further.
+Stopping here, as intended: not attempting a fourth example, and not turning this into a
+general theory of what extraction can and can't reach. What's confirmed is narrower and
+more useful than either — one real capability boundary exists somewhere in this
+neighborhood, its exact shape isn't pinned down, and no single prompt change closed it
+for all four passages tested.
+
+`_SYSTEM_INSTRUCTION`'s worked example is set to the **burned-dress** version, reverted
+from the disputed-note version the last run left it on. Leaving the note example in place
+was not the neutral choice it looked like: of the three, it's the one that demonstrably
+never worked, not even for itself, across two runs as its own literal demonstrated
+example. Shipping it wasn't avoiding a judgment call, it was shipping the worst-performing
+option by the only evidence collected. Burned-dress is kept instead for a narrower reason
+than "it scored highest": it's the one passage where swapping the example in and out
+visibly changed the outcome — absent when it wasn't demonstrated, present when it was.
+That's the one case where demonstration provably had an effect, which makes it the
+clearest evidence-backed example to actually ship, not a stand-in for "best."
+
 **Re-extraction of a `Source` that already has any linked `Claim` is a no-op unless
 `force=True`.** Extraction is not deterministic — the same source run twice will not
 produce the same claims — and a prior claim may already be `narratable=True` and cited
