@@ -1360,6 +1360,84 @@ explicitly flags its own content as speculative. Not fixed here — `role` isn't
 anything downstream yet — but worth recording before something starts reading `role` as
 if it carried the same evidentiary weight a narratable claim does.
 
+### Findings from the `source_7` run: not a match-or-new test, and five other gaps
+
+`source_7` (Lizzie Borden, `CONTEMPORANEOUS` tier) ran against `subject_id=8`'s existing
+nine Hinterkaifeck entities as known-entity context — the first run with any known
+entities present at all. Recorded here as findings, none fixed: no code or prompt change
+accompanies any of the six items below.
+
+**1. `subject_id=8` is not a subject — it is a fixture holding sources from three
+unrelated real cases, and after this run it can no longer host a match-or-new test at
+all.** `source_5` (an unrelated modern court PDF, used purely as a length fixture),
+`source_6` (Hinterkaifeck), and `source_7` (Lizzie Borden) all sit under one `Subject`
+row because the extraction-validation work that created this fixture needed a variety of
+source shapes, not because these are one real case. Because `Entity`/`EntityMatch` are
+subject-scoped (see above), this is not cosmetic: it means every entity extracted from
+any of these three sources lands in the *same* known-entity pool as the other two.
+Subject 8 now holds 25 `Entity` rows — 9 Hinterkaifeck, 16 Borden, zero overlap. Any
+further source run against `subject_id=8` would sit all 25 of those real, mutually
+unrelated people in known-entity context, contaminating exactly the decision match-or-new
+exists to test. **Consequence:** a clean subject built from two genuine same-case
+sources — the same real people actually appearing across both — is needed before
+match-or-new is tested at all. Nothing run against `subject_id=8` so far is that, and
+`subject_id=8` itself cannot become that without new sources under a different subject.
+
+**2. No participation bar on entity creation.** Burdell (`famous Burdell murder`, entity
+16), Carlyle Harris and Dr Buchanan (`cases of Carlyle Harris and Dr Buchanan`, entities
+23–24), Rufus Choate (`the master of pyrotechnic oratory`, entity 20), and Beecher (`used
+to say that a public man could not blow his nose on his own doorsteps`, entity 14) are
+all analogies and aphorisms the article's author reaches for — comparisons to other
+cases and other orators — not participants in the Borden case this source is actually
+about. All five became `Entity` rows with an assigned role regardless. Nothing in the
+prompt or `entity_extraction.py` distinguishes "named as a participant in this source's
+account" from "named as a rhetorical comparison." Not fixed here.
+
+**3. `role` has no sourcing bar and no participation bar, and both failure modes showed
+up in this one run.** Lizzie A. Borden was assigned `SUSPECT` from a span reading `Miss
+Lizzie A. Borden is Acquitted` (entity 13) — the source-sourcing-bar gap already recorded
+above, now with a case where the cited span's own content runs the opposite direction
+from the role assigned. Separately: Moody and Hosea M. Knowlton (the prosecution), ex
+Gov. Robinson (the defense), and Chief Justice Mason (the judge) were all assigned
+`INVESTIGATOR` (entities 17, 18, 19, 21) — `EntityRole`'s vocabulary
+(`VICTIM`/`SUSPECT`/`WITNESS`/`INVESTIGATOR`/`COMMENTATOR`) has no legal-role values, so
+the model forced four functionally distinct courtroom roles into the one bucket that
+least mismatches, and all four readings are inaccurate. Not fixed here — this is a
+vocabulary gap, not a classification error the current enum can express correctly.
+
+**4. `identifying_span` is not required to isolate one person.** Entities 23 (Carlyle
+Harris) and 24 (Dr Buchanan) share the identical span, `span_start=8610`,
+`span_end=8649`, `"cases of Carlyle Harris and Dr Buchanan"` — both entities cite the
+same substring as their founding evidence. This document's `EntityMatch` section
+describes `identifying_span` as "a verbatim substring in that source identifying this
+entity," but does not currently say whether a span naming two people at once is meant to
+be split so each entity gets its own isolating text, or whether citing the shared clause
+for both is acceptable when that clause is genuinely where the source names them
+together. Recording this as unspecified, not as a defect — SCHEMA.md as written today
+does not decide which reading is intended.
+
+**5. The rejection path has produced zero rejections across two real runs and may be
+untested in practice.** `source_6` (9/9 accepted) and `source_7` (16/16 accepted)
+together account for every real model response received so far, and neither produced a
+single rejection — not `span_not_found`, not `invalid_role`, not any of the
+`match_rationale` checks, not `duplicate_match_in_batch`. Every rejection reason
+`entity_extraction.py` can produce has only ever been exercised by the stub-provider unit
+tests. Two real runs is not enough to know whether this reflects the model reliably
+producing well-formed output against real sources, or whether the inputs seen so far
+simply haven't been the kind that would trigger one.
+
+**6. Source-faithful name variants will not match canonical forms, and this is untested
+at any meaningful scale.** The prompt asks for `name` "as it appears in this source" —
+verbatim to that source, not a canonical or normalized form. This run produced "Alicia
+Russell" and "Bridgett Sullivan" (entities 22, 25); other accounts of the same historical
+figures are not guaranteed to spell either name the same way. Nothing in the current
+match-or-new design normalizes or fuzzy-matches names — matching relies entirely on the
+model recognizing two differently-spelled mentions as the same person from context, a
+capability that has not been exercised even once, since no known-entity context so far
+has actually contained a name-variant collision to resolve. Whatever holds true at nine
+known entities says nothing about behavior at two hundred, where a real subject's
+known-entity list would plausibly sit.
+
 ### `image_rights`: copyright is not right-to-depict
 
 `image_rights` (`PUBLIC_DOMAIN`/`LICENSED`/`NONE`) speaks to exactly one axis: who owns
