@@ -1438,6 +1438,46 @@ has actually contained a name-variant collision to resolve. Whatever holds true 
 known entities says nothing about behavior at two hundred, where a real subject's
 known-entity list would plausibly sit.
 
+### `subject_id=9`: a clean subject for match-or-new, four candidates fetched, one to be extracted
+
+Built in response to finding 1 above: `subject_id=8` can no longer host a match-or-new
+test (25 entities across three unrelated real cases), so `subject_id=9` ("The
+Hinterkaifeck Farmstead Murders," real subject, not a fixture) was created to hold a
+second, genuinely same-case source alongside a re-fetched copy of `source_6`'s content.
+
+Four English-language candidate second sources were fetched — deliberately, before any
+extraction — and their text checked by hand for whether it actually distinguishes the two
+people this design exists to keep apart: Cäzilia Gruber (grandmother, 72) from Cäzilia
+Gabriel (granddaughter, 7), and all four Gabriels (Viktoria, Cäzilia, Josef, Karl) from
+each other. This check cost nothing against the Gemini quota — it's a text read, not a
+model call — precisely to avoid repeating the `source_7` mistake of spending a call before
+confirming the content could produce a real test.
+
+**None of the four candidates ever writes "Josef Gabriel" as a literal string** — every
+source identifies him by age and relationship ("Viktoria's son," "her two children") but
+never by that surname. `source_6`'s own founding `Entity` for him is likewise bare
+"Josef," no surname. Worth knowing before any of these run.
+
+- **mentalfloss.com** (source 8) — passes: explicit "elder Cäzilia" / "younger Cäzilia"
+  language distinguishes the two Cäzilias; all four Gabriels distinguished by name,
+  relationship, or age. Also the outlet `source_6`'s own text cites by name.
+- **Wikipedia** (source 9) — fails on Josef, who this source calls **"Josef Gruber"** in
+  its incest-paternity paragraph — a different, textually-supported surname, not a typo.
+  Separately (not one of the four Gabriels, but the same hazard): this source's own text
+  names a *third* "Cäzilia" — Cäzilia Gruber's child from an earlier marriage, born 1881,
+  never given a surname — that nothing in this design accounts for. Not selected.
+- **vocal.media** (source 10) — passes: both Cäzilias distinguished by relationship + age
+  alone ("his wife Cäzilia, 72" vs. "Viktoria's two children: Cäzilia, 7").
+- **hitched2homicide.com** (source 11) — passes, most explicitly: the only candidate that
+  tags the ambiguity directly in text, "Cäzilia (senior)" / "Cäzilia (junior)," rather than
+  leaving it to be inferred from age or relationship.
+
+**Recommended: source 11**, for the explicit tagging — if match-or-new still fails the
+two-Cäzilias test against this source, that's attributable to the extraction pipeline, not
+to the source's own phrasing. Only the confirmed candidate will be run through entity
+extraction; the other three are left fetched and unextracted **on purpose**, not because
+they were forgotten. `Subject.summary` on `subject_id=9` carries the same note.
+
 ### `image_rights`: copyright is not right-to-depict
 
 `image_rights` (`PUBLIC_DOMAIN`/`LICENSED`/`NONE`) speaks to exactly one axis: who owns
