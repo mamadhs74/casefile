@@ -1478,6 +1478,48 @@ to the source's own phrasing. Only the confirmed candidate will be run through e
 extraction; the other three are left fetched and unextracted **on purpose**, not because
 they were forgotten. `Subject.summary` on `subject_id=9` carries the same note.
 
+**Founding-entity run against `source_8` (mentalfloss.com): the core question passed, the
+literal expectation didn't hold, and the two are different things.** Extraction produced
+10 entities, not `source_6`'s 9, and the names aren't identical: this source names two
+people `source_6` never mentions (the autopsy physician, Dr. Johann Baptist Aumüller; the
+book author Peter Leuschner) and never names one `source_6` does (Konrad Müller, the
+retired investigator). Neither is a matching failure — this was the first source extracted
+for `subject_id=9`, so there was no known-entity context and nothing to match against;
+every candidate is necessarily founding. Two different real articles about the same case
+naming a different secondary cast is expected, not a defect. **The question that actually
+matters passed:** "Cäzilia" (the granddaughter, 7 — extracted with no surname, same
+bare-first-name pattern `source_6` gave "Josef") and "Cäzilia Gruber" (the grandmother)
+came back as two separate `Entity` rows, not one collapsed row. Recorded exactly as caught
+before going anywhere near `source_11` — the count/name mismatch was the agreed stop
+condition, even though it turned out not to indicate a problem.
+
+### `fetch.py`'s domain-duplicate check is unscoped by subject: legitimate cross-subject
+reuse of the same real source is currently impossible
+
+Not a bug in the check — it's doing exactly what its docstring says. Recorded as a finding
+because it has a real consequence this investigation ran into directly: **the same article,
+already fetched once for one subject, cannot be fetched again for a second subject.**
+Attempting to re-fetch `https://allthatsinteresting.com/hinterkaifeck-murders` (already
+`source_6`, under `subject_id=8`) into `subject_id=9` failed before any `Source` row was
+created.
+
+**Which branch fired, confirmed by the traceback's line number, not inferred:**
+`packages/research/fetch.py:174` — `_find_domain_wide_duplicate()`'s branch, which queries
+`Source` rows across *every* subject for a matching `(domain, text_sha256)` pair. Not the
+reference-sample branch (`fetch.py:170`, comparing against the domain root's own extracted
+text) — that would require the specific article page and the domain's homepage to extract
+to identical text, which didn't happen here; the traceback's frame pointed at line 174
+specifically, and `DuplicateSourceContentError` (the subject-scoped hash check, a different
+exception entirely) never had a chance to fire because the domain-wide check runs first and
+raised before reaching it.
+
+The check exists to catch templated chrome recurring across subjects on the same domain
+(see "Extraction specificity" above) — a real problem it's built correctly for. It cannot
+currently distinguish that from "the same real, non-chrome article, legitimately fetched a
+second time for a second subject": both look identical to it, same domain, same hash,
+different subject. Not fixed here, per instruction — recorded as a real, current limit:
+one source's content is pinned to whichever subject fetched it first.
+
 ### `image_rights`: copyright is not right-to-depict
 
 `image_rights` (`PUBLIC_DOMAIN`/`LICENSED`/`NONE`) speaks to exactly one axis: who owns
