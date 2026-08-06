@@ -1313,12 +1313,52 @@ over the same source, before it's even counted as a second pass. And because tha
 context is exactly the unbounded-growth object above, "roughly 2x" is a lower bound that
 only holds early in a subject's life — it gets worse, not flat, as sources accumulate.
 
+**Hard constraint, not a cost curve: the free-tier Gemini quota is 20 `generate_content`
+requests per project per day** (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`,
+confirmed against the real API via a `429 RESOURCE_EXHAUSTED` response, not read from
+documentation). Every source costs one call for claim extraction plus one for entity
+extraction, so the effective ceiling is **ten sources per day** — and that budget is
+shared with every `--dry-run` request preview and every prompt-iteration experiment
+against a real source, not reserved for production extraction calls alone. This is the
+same free tier `gemini_provider.py`'s own docstring already named as a known risk
+("free-tier providers have a documented history of silently deleting or replacing
+models"); the request cap is a second, independent constraint from the same tier, not a
+new kind of risk.
+
+**This blocked entity extraction's match-or-new validation on its very first attempt.**
+Step 5's plan was to run `source_id=6` then `source_id=7` (same subject) to get the first
+real evidence of the match-or-new path — the whole reason `EntityMatch` exists. The
+`source_id=6` run succeeded; `source_id=7` hit the daily cap immediately afterward, so
+match-or-new remains unvalidated against a real model response as of this writing.
+
+**Prompt-iteration work of the kind already documented above for claim extraction is
+expensive against this budget, not free experimentation.** The burned-dress/barn/
+disputed-note investigation above took six separate real runs against one source to
+separate two competing hypotheses; that kind of investigation against a 20-call daily
+ceiling, shared with every other real call a subject's research needs that same day, is
+a small number of iterations, not a large one. Worth weighing before assuming a prompt
+question can be settled same-day.
+
 `image_rights` is omitted from the entity-extraction provider's structured-output schema
 entirely — the model is never asked for it, the same treatment `narratable` already gets
 from claim extraction. A source's text can establish who someone is and what they did;
 it cannot establish who owns the copyright to a photo of them, or whether we're licensed
 to use one — that's an asset-side fact (CLAUDE.md's R6, `AssetStore`/`LicenseType`), not
 a text-extraction fact.
+
+**`role` has no sourcing bar at all, and this is a real gap, not a hypothetical one — it
+materialized on entity extraction's first real run.** The narratable invariant requires
+every source backing a `Claim` to be Tier A before `narratable=True` can be set; `role`
+has no equivalent bar, at any tier. Concretely: against `source_6` (an `UNVERIFIED`-tier
+Hinterkaifeck retrospective), entity 10, Karl Gabriel, was created with `role=SUSPECT` on
+the strength of "Some theories claim that Karl Gabriel had not actually died, then
+discovered the relationship between his wife and her father, and killed the family in a
+fit of rage" — a passage the source itself frames as one disputed theory among several,
+not an established fact. Nothing in `entity_extraction.py` or this schema stops a role
+from being set this way, from a source of any tier, on the basis of a passage that
+explicitly flags its own content as speculative. Not fixed here — `role` isn't wired into
+anything downstream yet — but worth recording before something starts reading `role` as
+if it carried the same evidentiary weight a narratable claim does.
 
 ### `image_rights`: copyright is not right-to-depict
 
