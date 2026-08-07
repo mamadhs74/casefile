@@ -14,7 +14,7 @@ gate, one with a failing one. It's meant for exercising the case library UI
 against real data rather than an empty database.
 
 ```
-uv run python scripts/seed_dev.py
+uv run python -m scripts.seed_dev
 ```
 
 Safe to re-run: it checks for existing cases first and does nothing if the

@@ -7,7 +7,10 @@ Source.domain are all computed/validated by packages/db/listeners.py on
 insert -- this script never sets the computed ones directly, same as the
 API never accepts them from a client.
 
-Run with: uv run python scripts/seed_dev.py
+Usage (module form -- `packages` isn't importable when this file is run as
+a bare script path, since this project isn't installed as a package; see
+docs/SCHEMA.md):
+    uv run python -m scripts.seed_dev
 """
 
 from __future__ import annotations
