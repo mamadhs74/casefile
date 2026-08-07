@@ -1520,6 +1520,91 @@ second time for a second subject": both look identical to it, same domain, same 
 different subject. Not fixed here, per instruction — recorded as a real, current limit:
 one source's content is pinned to whichever subject fetched it first.
 
+### First real match-or-new test: `source_11` against `source_8`'s 10 founding entities
+
+8 of 10 matched, 0 new entities, 0 rejections. Both Cäzilias stayed distinct — entity 29
+(the granddaughter) and entity 32 (the grandmother) matched correctly and separately, not
+collapsed. Confirmed the two "new" people from the `source_8` run (Dr. Johann Baptist
+Aumüller, Peter Leuschner) are genuinely absent from `source_11`'s text, not missed
+matches — grepped directly, all four of "Aumüller," "Leuschner," "Peter Leuschner," and
+"Johann Baptist" return nothing.
+
+**`source_11`'s "(senior)" tag was not the cited span for entity 32.** The model matched
+entity 32 correctly, but located its evidence at an earlier, untagged mention — "his wife
+Cäzilia" — and reasoned from relationship ("the older Cäzilia and wife of Andreas
+Gruber"), not from the parenthetical tag `source_11` was specifically chosen for. Entity
+29, by contrast, did cite the tagged text directly ("little Cäzilia (junior)"). Net effect:
+the test landed harder than designed for entity 32 and easier than designed for entity
+29 — the explicit disambiguator this source was picked for only did work for one of the
+two people it was meant to help with.
+
+**No rationale argued from surname presence or absence**, including on the 28/32 pair
+where "Gruber" was present on one and absent from the candidate's own name and could have
+been leaned on. Both used relationship/age-descriptor language instead.
+
+**All 8 rationales share one template: "Both sources identify X as Y."** Not a defect in
+this run — every one was accurate — but worth recording as a pattern: `match_rationale`'s
+entire reason for existing (see "Entity extraction" above) is making a match decision
+inspectable, not just correct-by-assertion, and a rationale that's structurally identical
+across every match is harder for a human reviewer to actually scrutinize at scale than one
+that varies with what was actually distinctive about each case. The design assumes
+rationales are individually inspectable; nothing yet tests whether that assumption holds
+once a rationale's wording stops carrying information beyond "yes, matched."
+
+**Still untested, after three real runs:** matching without any explicit disambiguation
+tag in the source; matching at any n meaningfully larger than 10 known entities; and the
+rejection path, which has now produced zero rejections across `source_6`, `source_8`, and
+`source_11` combined — three real runs, still no evidence of how it behaves against real
+malformed model output.
+
+### Second match-or-new test, `source_10` (vocal.media): the unaided case, and it passed
+
+8 of 10 matched again, 0 new, 0 rejections. Both Cäzilias distinct again. **This is the
+test `source_11` couldn't run:** `source_10`'s text carries no `(senior)`/`(junior)` tag
+or any other explicit disambiguator anywhere — grepped directly, confirmed absent, same
+as the `source_11` check. Every distinction in this run came from age and relationship
+alone, exactly what was designed to be tested. Confirmed again that "Aumüller,"
+"Leuschner," "Peter Leuschner," and "Johann Baptist" are genuinely absent from this
+source's text too, not missed matches — 8 of 10 matching twice in a row looks identical
+in the output whether the two unmatched people are absent or missed, so this has to be
+checked by hand each time, not assumed from the count.
+
+**Headline, stated plainly: match-or-new passed the unaided test.** Two passing real runs
+now — `source_11` (tagged) and `source_10` (untagged) — both keeping the two Cäzilias
+distinct, neither run producing a single surname-presence argument in any rationale on
+either pair that needed to distinguish something. The entity 32 match's own cited
+evidence changed between runs too, and improved: `source_11` cited "his wife Cäzilia" (no
+age in the span itself); `source_10` cited "his wife Cäzilia, 72" (age present directly in
+the evidence). Still untested, unchanged from above: n much larger than 10; name-variant
+spellings across sources (no source run so far has spelled any of the six target people
+two different ways); and the rejection path, now zero rejections across **four** real
+runs (`source_6`, `source_8`, `source_11`, `source_10`).
+
+**Finding: `identifying_span` is not required to contain the evidence its own
+`match_rationale` reasons from — span plus rationale is not currently a self-contained
+audit record.** Entity 29's matched span in this run is "young Cäzilia had torn out tufts
+of her hair"; its rationale is "the 7-year-old daughter of Viktoria Gabriel." The match is
+correct, and the age genuinely is in `source_10`'s text — just not in *this* located span.
+A reviewer checking only the stored `(identifying_span, match_rationale)` pair for this row
+cannot verify "7-year-old" against what's actually quoted; they'd have to go find it
+themselves elsewhere in the source. Not a fabrication (the span is real, the rationale's
+claim is also real, just not co-located) and not fixed here — recorded because it changes
+what "inspectable" actually means for this design: today it means the *span* is verifiable
+and the *rationale* is human-readable, not that the rationale's claims are verifiable
+against the span they're attached to.
+
+**Cross-reference: entity 30's span names two people, same shape as finding 4 above,
+recurring on a different subject.** "The maid, Maria, and two-year-old Josef were
+discovered inside the house, also murdered in the same brutal manner" is entity 30
+(Josef)'s cited evidence — and it names Maria Baumgartner (entity 34) in the same
+sentence, the identical pattern finding 4 recorded for entities 23/24 (Carlyle Harris /
+Dr Buchanan) sharing one span on `subject_id=8`. There, both entities cited the *exact
+same* span; here, only one of the two people named in the sentence has that sentence as
+their own cited span (entity 34's own citation, elsewhere in this table, is a different
+sentence). Still the same open question finding 4 raised: SCHEMA.md doesn't currently say
+whether a span naming multiple people is expected to be trimmed to just the cited entity,
+and this is now observed on two different subjects, not one.
+
 ### `image_rights`: copyright is not right-to-depict
 
 `image_rights` (`PUBLIC_DOMAIN`/`LICENSED`/`NONE`) speaks to exactly one axis: who owns
