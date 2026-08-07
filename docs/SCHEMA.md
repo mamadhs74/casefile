@@ -1796,6 +1796,28 @@ adapters.
   subject, but nothing here resolves one. This is the hardest part of the hosted
   service and the part most likely to be forgotten if it isn't written down now.
 
+### Finding: the documented render gate and uniqueness constraint are both unenforced
+
+Same shape as the entity-extraction findings above — a real gap discovered by reading
+code against documentation, not by running anything. Two separate instances:
+
+**The thesis render gate is described, not implemented.** This document says `thesis`
+and `architecture` are **"enforced non-empty/non-null at a render gate check, not by a
+`NOT NULL` column"** (above). `docs/POLICY.md`'s R1 says the same thing independently,
+from the platform-policy side: **"Every episode carries a human-authored editorial
+thesis. Render fails without one."** Grepped the codebase: no such check exists anywhere.
+There is no render stage built yet for it to live in. Both documents describe intended
+enforcement in the present tense; neither is currently true of the code.
+
+**`generation_fingerprint` has a column and a `UniqueConstraint`, but nothing has ever
+computed one.** The constraint (`UniqueConstraint(subject_id, generation_fingerprint)`)
+is real at the DB level and would fire correctly if two `Episode` rows ever carried the
+same non-`None` fingerprint — but grepped: no function anywhere in the codebase computes
+`generation_fingerprint` from `(thesis, architecture, ordered claim IDs)`. The constraint
+exists and has never been exercised by a real write. "Enforced now," as this document
+describes the exact-duplicate floor above, is true of the schema, not yet of any actual
+generation path, because there is no generation path yet.
+
 ---
 
 ## VariationProfile
