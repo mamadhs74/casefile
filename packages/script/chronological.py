@@ -11,17 +11,16 @@ with any real `Episode` row.
 
 Every claim reached through `EpisodeClaim` was narratable at the point it
 was added to the episode -- `EpisodeClaim.before_insert`
-(packages/db/listeners.py) guarantees that. This module does not re-check
-it at generation time, which is a real gap worth naming rather than
-silently carrying forward: `Claim.before_update` only validates a flip
-*to* narratable=True, not away from it, so a claim's sourcing could be
-degraded after it's already in an episode's claim set with nothing
-noticing until generation, and this version still wouldn't notice then
-either. The previous version of this module (subject_id/claim_ids
-signature) re-checked narratable per claim as defense in depth; this
-rewrite dropped that check rather than carry it forward unexamined into a
-new signature -- not because the gap closed, but because re-adding it
-wasn't part of this step's approved scope. Not fixed here.
+(packages/db/listeners.py) guarantees that once, at insert time. It does
+not guarantee it stays true: `Claim.before_update` only validates a flip
+*to* narratable=True, never away from it, so a claim's sourcing can be
+degraded after it's already sitting in an episode's claim set with
+nothing at the persistence layer noticing. This module re-checks
+`narratable` on every claim it reaches, at generation time, specifically
+to close that path -- the point where a degraded claim would otherwise
+reach a script is exactly the point this check runs, immediately after
+the claim set is queried and before any count-based rule or any output
+is built.
 """
 
 from __future__ import annotations
@@ -94,6 +93,19 @@ class InsufficientClaimCountError(Exception):
         super().__init__(f"episode {episode_id} has {count} claims, need at least {minimum}")
 
 
+class ClaimNotNarratableError(Exception):
+    """Defense in depth, not the only guard: EpisodeClaim.before_insert
+    already rejects a non-narratable claim at the point it's added to an
+    episode, but Claim.before_update lets narratable flip back to False
+    afterward with no check at all -- see this module's own docstring.
+    Re-checked here at generation time, the point where a claim degraded
+    after insertion would otherwise reach a script unnoticed."""
+
+    def __init__(self, claim_id: int) -> None:
+        self.claim_id = claim_id
+        super().__init__(f"claim {claim_id} is not narratable -- flip it by hand first")
+
+
 def generate_script(
     session: Session,
     episode_id: int,
@@ -101,6 +113,7 @@ def generate_script(
     min_claim_count: int = MIN_TOTAL_CLAIM_COUNT,
 ) -> str:
     """Checks run in this order: episode exists; render gate (rule 8);
+    per-claim narratable (defense in depth -- see module docstring);
     thesis-bearing count (rule 6); total claim count (rule 7, against
     min_claim_count -- see that constant's own comment for why it's
     injectable). Ordering of the output itself is unchanged from the
@@ -126,6 +139,11 @@ def generate_script(
             .where(EpisodeClaim.episode_id == episode_id, Claim.id == EpisodeClaim.claim_id)
         )
     )
+
+    for _, claim in rows:
+        if not claim.narratable:
+            assert claim.id is not None
+            raise ClaimNotNarratableError(claim.id)
 
     thesis_bearing_count = sum(1 for episode_claim, _ in rows if episode_claim.thesis_bearing)
     if not (MIN_THESIS_BEARING_CLAIMS <= thesis_bearing_count <= MAX_THESIS_BEARING_CLAIMS):
