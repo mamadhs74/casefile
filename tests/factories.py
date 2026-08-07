@@ -11,6 +11,7 @@ from packages.db.models import (
     Entity,
     EntityMatch,
     Episode,
+    EpisodeClaim,
     Source,
     Strategy,
     Subject,
@@ -174,6 +175,19 @@ def make_entity_match(entity_id: int, source_id: int, **overrides: Any) -> Entit
     )
     defaults.update(overrides)
     return EntityMatch(**defaults)
+
+
+def make_episode_claim(episode_id: int, claim_id: int, **overrides: Any) -> EpisodeClaim:
+    # thesis_bearing defaults False -- docs/ARCHITECTURES.md sec 4's thesis
+    # mechanism, a deliberate human write, same shape as Claim.narratable.
+    defaults: dict[str, Any] = dict(
+        episode_id=episode_id,
+        claim_id=claim_id,
+        position=0,
+        thesis_bearing=False,
+    )
+    defaults.update(overrides)
+    return EpisodeClaim(**defaults)
 
 
 def make_subtitle_style(**overrides: Any) -> SubtitleStyle:

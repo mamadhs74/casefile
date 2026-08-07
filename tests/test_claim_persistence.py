@@ -29,6 +29,7 @@ from tests.factories import (
     make_claim_source,
     make_entity,
     make_episode,
+    make_episode_claim,
     make_source,
     make_subject,
     make_subtitle_style,
@@ -321,6 +322,68 @@ def test_episode_claim_accepts_narratable_claim(session: Session, strategy_id: i
 
     session.add(EpisodeClaim(episode_id=episode_id, claim_id=claim_id, position=0))
     session.commit()  # must not raise
+
+
+# --------------------------------------------------------------------------
+# EpisodeClaim.thesis_bearing -- docs/ARCHITECTURES.md sec 4's thesis
+# mechanism, a deliberate human write, same shape as Claim.narratable
+# --------------------------------------------------------------------------
+
+
+def test_episode_claim_thesis_bearing_defaults_false(
+    session: Session, strategy_id: int
+) -> None:
+    subject_id = _persist(session, make_subject(strategy_id))
+    claim_id = _persist(session, make_claim(subject_id))
+    source_id = _persist(session, make_source(subject_id, tier=SourceTier.PRIMARY_RECORD))
+    session.add(make_claim_source(claim_id, source_id))
+    session.commit()
+    claim = session.get(Claim, claim_id)
+    assert claim is not None
+    claim.narratable = True
+    session.add(claim)
+    session.commit()
+
+    variation_profile_id = _make_variation_profile_id(session, strategy_id)
+    episode_id = _persist(session, make_episode(subject_id, variation_profile_id))
+    episode_claim_id = _persist(session, make_episode_claim(episode_id, claim_id))
+
+    episode_claim = session.get(EpisodeClaim, episode_claim_id)
+    assert episode_claim is not None
+    assert episode_claim.thesis_bearing is False
+
+
+def test_episode_claim_thesis_bearing_set_true_persists(
+    session: Session, strategy_id: int
+) -> None:
+    subject_id = _persist(session, make_subject(strategy_id))
+    claim_id = _persist(session, make_claim(subject_id))
+    source_id = _persist(session, make_source(subject_id, tier=SourceTier.PRIMARY_RECORD))
+    session.add(make_claim_source(claim_id, source_id))
+    session.commit()
+    claim = session.get(Claim, claim_id)
+    assert claim is not None
+    claim.narratable = True
+    session.add(claim)
+    session.commit()
+
+    variation_profile_id = _make_variation_profile_id(session, strategy_id)
+    episode_id = _persist(session, make_episode(subject_id, variation_profile_id))
+    episode_claim_id = _persist(session, make_episode_claim(episode_id, claim_id))
+
+    episode_claim = session.get(EpisodeClaim, episode_claim_id)
+    assert episode_claim is not None
+    episode_claim.thesis_bearing = True
+    session.add(episode_claim)
+    session.commit()
+
+    # Expire and re-fetch rather than trust the same in-memory object --
+    # this proves the value round-tripped through the database, not just
+    # that the Python attribute held what we set on it.
+    session.expire(episode_claim)
+    reloaded = session.get(EpisodeClaim, episode_claim_id)
+    assert reloaded is not None
+    assert reloaded.thesis_bearing is True
 
 
 # --------------------------------------------------------------------------
