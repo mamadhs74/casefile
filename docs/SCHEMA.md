@@ -854,6 +854,18 @@ bypasses all five listeners, the same way it would bypass `Subject`'s scoring or
 `Source`'s domain derivation. Nothing here changes that trust model, it just applies it
 to a new invariant.
 
+**Asymmetric by direction, not just by trust boundary.** All five touchpoints above
+guard flips toward `narratable=True`; none guard the reverse. `Claim.before_update`
+(touchpoint 2) returns immediately when `target.narratable` is falsy, so setting
+`narratable=False` on an already-narratable claim is a completely unguarded write — no
+listener, no downstream check. `packages/script/chronological.py::generate_script()`
+re-checks `narratable` per claim at generation time specifically because of this gap,
+raising `ClaimNotNarratableError` on the first claim it finds already degraded, but
+that's a generation-time re-check, not a persistence-layer guarantee — a bulk `UPDATE`
+(the same listener-bypass shape finding #12 already names) or any write path that never
+reaches `generate_script` leaves a downgraded claim sitting in an `EpisodeClaim` set
+indefinitely with nothing at the schema level ever objecting. Open.
+
 ### Claim extraction (`packages/research/claim_extraction.py`)
 
 Turns a persisted `Source`'s text into `Claim`/`ClaimSource` rows. Every claim it
@@ -1932,6 +1944,19 @@ from the platform-policy side: **"Every episode carries a human-authored editori
 thesis. Render fails without one."** Grepped the codebase: no such check exists anywhere.
 There is no render stage built yet for it to live in. Both documents describe intended
 enforcement in the present tense; neither is currently true of the code.
+
+**Update: partially closed.** `packages/script/chronological.py::generate_script()` now
+enforces this at generation time — `EpisodeNotRenderableError` if `Episode.thesis` is
+empty or `Episode.architecture` is null, checked before any claim is queried. That's
+rule 8 of `docs/ARCHITECTURES.md` v2's generation-time rules. The other half is still
+open: nothing stops an `Episode` from being *created and stored* with an empty thesis or
+null architecture in the first place — the columns stay nullable with no persistence-
+layer listener, so a row can sit in that state indefinitely until something happens to
+call `generate_script` against it. The remaining half, if built, would live as a
+persistence-layer check on the stage transition into rendering (`Episode.advance_to()`
+or an `Episode.before_update` listener scoped to that transition), not as a `NOT NULL`
+column — the columns are deliberately nullable at `CREATED`, per this section, long
+before either field is chosen.
 
 **`generation_fingerprint` has a column and a `UniqueConstraint`, but nothing has ever
 computed one.** The constraint (`UniqueConstraint(subject_id, generation_fingerprint)`)
