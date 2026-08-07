@@ -80,7 +80,7 @@ senior-developer commit style with a banned-word list.
 - Media: Azure Neural TTS, faster-whisper forced alignment, ffmpeg render with libass subtitle
   burn-in
 - LLM: Gemini free tier behind a provider interface
-- Tests: **338 passing**, mypy strict clean, ruff clean
+- Tests: **346 passing**, mypy strict clean, ruff clean
 
 **Gemini free tier is 20 requests/day/project.** Two calls per source (claims + entities), so ten
 sources a day, shared with every dry-run and prompt experiment. This is a real constraint on every
@@ -116,23 +116,26 @@ against real sources.
 
 Channels exist as schema only, no OAuth.
 
-**Script generation** — step 1 of the build is done. `generate_script(session,
+**Script generation** — steps 1 and 2 of the build are done. `generate_script(session,
 episode_id, *, min_claim_count=40)` takes `episode_id`, not `subject_id` plus a raw
-claim-id list; thesis, architecture, and thesis-bearing flags all come off
-`Episode`/`EpisodeClaim`. Enforces the render gate (rule 8 — closes finding #13 at
-generation time, not at persistence, see `docs/SCHEMA.md`), rules 6 and 7 (thesis-bearing
-count 5–10, total claim count ≥ 40, the latter injectable so tests don't need 40 real
-rows), and a per-claim `narratable` re-check (`Claim.before_update` only guards the flip
-*to* narratable, never away from it — this is the generation-time backstop for that
-gap). Output is still flat concatenation, one claim per line, `date_anchor` order — no
-six-section structure, no thesis-bearing word-weighting yet. That's step 2.
+claim-id list; thesis, architecture, thesis-bearing flags, and cold-open selection all
+come off `Episode`/`EpisodeClaim`. Enforces the render gate (rule 8 — closes finding
+#13 at generation time, not at persistence), rules 6 and 7 (thesis-bearing count 5–10,
+total claim count ≥ 40, the latter injectable so tests don't need 40 real rows), a
+per-claim `narratable` re-check, and cold-open validation (must be set, must exist,
+must be in the episode's claim set, must be thesis-bearing — four named errors).
 
-Step 2's schema prerequisites are also done: `Claim.section` (`GROUND`/`RESOLUTION`,
-nullable, null means Sequence) and `Episode.cold_open_claim_id` (nullable FK,
-declarative only — `packages/db/session.py` never enables SQLite foreign-key
-enforcement, confirmed empirically) both exist, migrated and tested. `generate_script`
-itself doesn't read either field yet — building the six-section structure against them
-is next, not done.
+It now returns `SectionedScript` (six named fields, plus a `.text` property), not a bare
+`str`. Section allocation reads `Claim.section` — `GROUND`/`RESOLUTION` go to their named
+sections, null goes to Sequence, and the untagged count is reported, never treated as an
+error. Rule 4 (section word counts within ±15% of budget, derived from
+`VariationProfile.narration_wpm` per `docs/ARCHITECTURES.md` §2, not a hardcoded rate) is
+computed and reported on the return value, not enforced — concatenation can't hit a word
+target, so raising on it would make this function permanently unable to succeed until
+step 3's composition exists. Return emits `Episode.thesis` verbatim as a visible
+placeholder, since real paraphrase needs that same composition.
+
+Content is still concatenation, not composition, everywhere. That's step 3.
 
 **Roughly 28% of the full vision.**
 
@@ -251,11 +254,14 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
 
 ### Script generation
 
-29. **`generate_script` reads `Episode.architecture` only for the render gate's null-check.**
-    Nothing branches on its value, so `CHRONOLOGICAL` and any other enum member still produce
-    identical output. Same failure as #17, one layer down — at the artifact rather than at
-    `EpisodeClaim`. Closes when step 2 (the six-section structure) lands — that's the first code
-    that will actually differ by architecture.
+29. **Closed.** Step 2 (the six-section structure) is what closed it: `generate_script` now
+    builds real Ground/Sequence/Resolution allocation, cold-open selection, and rule 6/7
+    preconditions — genuinely architecture-specific behavior, not a flat concatenation
+    indifferent to what `Episode.architecture` said. One residual gap, not the same finding:
+    nothing checks that `Episode.architecture` actually **equals** `CHRONOLOGICAL` before running
+    this logic — an episode tagged `INVESTIGATION_LED` would still get the chronological
+    six-section treatment, since the render gate only checks non-null. Dispatch-by-value belongs
+    one layer up (whatever calls this module for a given episode), not inside it.
 
 ---
 
@@ -343,22 +349,18 @@ not the next step anymore.
 
 `docs/ARCHITECTURES.md` (v2, authoritative) is the spec the generator is built against.
 
-**Step 1 is done:** `EpisodeClaim.thesis_bearing` (migration + model field), and
-`generate_script(session, episode_id, ...)` — the render gate, rules 6 and 7, and the
-narratable re-check, all tested. **Step 2's schema work is also done:** `Claim.section`
-and `Episode.cold_open_claim_id` (migrations + model fields + tests, 338 passing). See
-§5. `generate_script` doesn't read either field yet — that's the remaining part of step
-2. New next steps, in order:
+**Steps 1 and 2 are both done:** `EpisodeClaim.thesis_bearing`, `Claim.section`,
+`Episode.cold_open_claim_id` (migrations + model fields), and `generate_script(session,
+episode_id, ...)` returning `SectionedScript` — the render gate, rules 6 and 7, the
+narratable re-check, section allocation, and all four cold-open validations, all tested,
+346 passing. See §5. Content is still concatenation everywhere, not composition. New
+next steps, in order:
 
-1. **Step 2, the generator changes.** Build the six-section structure against
-   `Claim.section` and `Episode.cold_open_claim_id` — cold open, thesis, ground,
-   sequence, resolution, return, per ARCHITECTURES.md v2 §3. Rule 4 (word budget)
-   checked-and-reported, not enforced yet; Return emits `Episode.thesis` verbatim as a
-   visible placeholder, since real paraphrase needs the composition step 3 doesn't have.
-2. **Step 3: the LLM pass.** Composing a claim to a word target (rule 4's "satisfy" half,
-   not just its "check" half) is the one place flat concatenation genuinely can't reach —
-   this is where a model call finally becomes necessary.
-3. **A rendered episode.** First real end-to-end output, against whichever subject actually
+1. **Step 3: the LLM pass.** Composing a claim to a word target (rule 4's "satisfy" half,
+   not just its "check" half, which step 2 already reports) is the one place flat
+   concatenation genuinely can't reach, and the same gap blocks Return's real paraphrase
+   — this is where a model call finally becomes necessary.
+2. **A rendered episode.** First real end-to-end output, against whichever subject actually
    clears R1's gate by then.
 
 Why Borden and not Hinterkaifeck: Hinterkaifeck's Tier A material is 1922 German police and inquest
