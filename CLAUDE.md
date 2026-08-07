@@ -161,6 +161,7 @@ That correlation is the real product.
   already caused a write to the real database.
 - Never issue POST, PATCH, or DELETE against a server you did not start yourself in
   this session.
+- New findings-ledger entries in `docs/SCHEMA.md` get one paragraph, no more.
 
 ## Commit style
 
