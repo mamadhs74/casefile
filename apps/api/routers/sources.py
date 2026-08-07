@@ -44,6 +44,6 @@ def get_source_gate(subject_id: int, session: SessionDep) -> GateResultRead:
         passed=result.passed,
         reasons=result.reasons,
         verified_source_count=result.verified_source_count,
-        primary_record_count=result.primary_record_count,
+        tier_a_source_count=result.tier_a_source_count,
         distinct_domain_count=result.distinct_domain_count,
     )

@@ -358,7 +358,8 @@ never be cited in a script.
 
 Passes only when all hold:
 1. At least `strategy.min_verified_sources` sources with tier other than `UNVERIFIED`
-2. At least `strategy.min_primary_records` with tier `PRIMARY_RECORD`
+2. At least `strategy.min_primary_records` with tier in `TIER_A_SOURCE_TIERS`
+   (`PRIMARY_RECORD` or `CONTEMPORANEOUS`)
 3. At least `strategy.min_distinct_domains` **distinct** `domain` values among them
    (independence)
 
@@ -366,6 +367,45 @@ The gate's structure — three named conditions, shared code — is reused by ev
 strategy unchanged; only the numeric thresholds vary, read from the subject's own
 `Strategy` row (see "Strategy" above for why thresholds are data while eligibility
 scoring is code). Returns structured failure reasons, not a bare bool.
+
+### Finding: condition 2 was narrower than CLAUDE.md's own R1 — resolved as drift,
+not a weakening
+
+CLAUDE.md's R1 names *"contemporaneous news archive"* directly as an example of a
+primary/public record. `check_source_gate()`'s condition 2 checked `tier ==
+PRIMARY_RECORD` only, excluding `CONTEMPORANEOUS` — the one place in the codebase these
+two tiers diverged. Every other enforcement point (`Claim`/`ClaimSource`/`Source`'s
+narratable-invariant touchpoints, the `living_evidence` invariant's two touchpoints, and
+`claim_extraction.py`'s Tier-A-empty-claims flag) already used `TIER_A_SOURCE_TIERS` and
+treated the two tiers identically. Searched `docs/SOURCING.md` and this document
+directly for a rationale before touching anything: neither states one.
+`docs/SOURCING.md`'s Tier A definition lists primary-record and contemporaneous-report
+sourcing as undifferentiated bullets under one heading; this document's own narratable
+invariant already defines "Tier A" as their union. No sentence anywhere says the gate
+should be narrower than that union.
+
+Widened `condition 2` to `tier in TIER_A_SOURCE_TIERS`, matching the other six
+enforcement points and CLAUDE.md's own definition. `SourceGateFailureReason.MISSING_PRIMARY_RECORD`
+renamed to `MISSING_TIER_A_SOURCE` (it no longer meant what its name said) and
+`GateResult.primary_record_count` renamed to `tier_a_source_count`, propagated through
+`apps/api/schemas.py`, `apps/api/routers/sources.py`, and the frontend
+(`lib/domain.ts`'s label map, `GateStatus.tsx`'s lookup key and its hardcoded "primary
+record" UI label, and `api/schema.ts` regenerated from the running API, not hand-edited).
+Recorded as resolving an implementation/documentation mismatch in favor of the rule as
+written, not as loosening R1 — `docs/POLICY.md`'s monetization argument, checked
+directly, never mentions source-tier granularity anywhere; it's entirely about
+structural variation and non-interchangeability, which this change doesn't touch.
+
+**This change overturns behavior that was asserted by a passing test, and the test was
+rewritten rather than removed.** `tests/test_gate.py::test_gate_fails_on_missing_primary_record`
+built a subject with a `CONTEMPORANEOUS` source (plus `RETROSPECTIVE` and `BOOK`) and
+asserted the gate failed condition 2 anyway — a direct, working assertion of the exact
+behavior this finding calls drift. Renamed to `test_gate_fails_with_no_tier_a_source`
+and rebuilt from `RETROSPECTIVE`/`BOOK`/`REFERENCE` sources — none of them Tier A under
+either the old or new reading — so it still tests condition 2 failing, now correctly
+scoped instead of accidentally scoped. **The narrow behavior existed only in code and in
+that one test — never in `docs/SOURCING.md`, never in this document, until this
+paragraph.**
 
 ### Fetch layer (`packages/research/fetch.py`)
 

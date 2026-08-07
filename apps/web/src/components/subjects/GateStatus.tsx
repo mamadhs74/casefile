@@ -26,8 +26,8 @@ export function GateStatus({
       label: `${gate.verified_source_count} of ${minVerifiedSources} verified sources`,
     },
     {
-      key: 'missing_primary_record',
-      label: `${gate.primary_record_count} of ${minPrimaryRecords} primary record`,
+      key: 'missing_tier_a_source',
+      label: `${gate.tier_a_source_count} of ${minPrimaryRecords} primary/contemporaneous source`,
     },
     {
       key: 'insufficient_distinct_domains',

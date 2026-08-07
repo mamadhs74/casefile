@@ -118,7 +118,7 @@ class GateResultRead(BaseModel):
     passed: bool
     reasons: list[SourceGateFailureReason]
     verified_source_count: int
-    primary_record_count: int
+    tier_a_source_count: int
     distinct_domain_count: int
 
 

@@ -82,6 +82,6 @@ export const sourceTierLabels: Record<SourceTier, string> = {
 
 export const gateFailureReasonLabels: Record<SourceGateFailureReason, string> = {
   insufficient_verified_sources: 'Needs more verified sources',
-  missing_primary_record: 'Needs a primary record',
+  missing_tier_a_source: 'Needs a primary record or contemporaneous report',
   insufficient_distinct_domains: 'Needs more distinct source domains',
 };

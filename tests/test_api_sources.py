@@ -102,7 +102,7 @@ def test_gate_endpoint_fails_before_enough_sources(client: TestClient) -> None:
     body = response.json()
     assert body["passed"] is False
     assert "insufficient_verified_sources" in body["reasons"]
-    assert "missing_primary_record" in body["reasons"]
+    assert "missing_tier_a_source" in body["reasons"]
 
 
 def test_gate_endpoint_passes_with_three_independent_sources(client: TestClient) -> None:

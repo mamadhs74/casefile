@@ -265,8 +265,8 @@ export interface components {
             reasons: components["schemas"]["SourceGateFailureReason"][];
             /** Verified Source Count */
             verified_source_count: number;
-            /** Primary Record Count */
-            primary_record_count: number;
+            /** Tier A Source Count */
+            tier_a_source_count: number;
             /** Distinct Domain Count */
             distinct_domain_count: number;
         };
@@ -319,7 +319,7 @@ export interface components {
          * SourceGateFailureReason
          * @enum {string}
          */
-        SourceGateFailureReason: "insufficient_verified_sources" | "missing_primary_record" | "insufficient_distinct_domains";
+        SourceGateFailureReason: "insufficient_verified_sources" | "missing_tier_a_source" | "insufficient_distinct_domains";
         /** SourceRead */
         SourceRead: {
             /** Id */

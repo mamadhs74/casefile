@@ -2,7 +2,11 @@
 
 Passes only when all hold:
 1. At least strategy.min_verified_sources sources with tier other than UNVERIFIED
-2. At least strategy.min_primary_records with tier PRIMARY_RECORD
+2. At least strategy.min_primary_records with tier in TIER_A_SOURCE_TIERS
+   (PRIMARY_RECORD or CONTEMPORANEOUS) -- CLAUDE.md's own R1 names "contemporaneous
+   news archive" as an example of a primary/public record; this used to check
+   PRIMARY_RECORD alone, the one place in the codebase these two tiers diverged.
+   See docs/SCHEMA.md for the drift this corrects.
 3. At least strategy.min_distinct_domains distinct domain values among them (independence)
 
 The gate's structure -- three named conditions, not a single opaque bool --
@@ -21,7 +25,7 @@ from sqlmodel import Session, select
 
 from packages.db.models import Source, Strategy, Subject
 from packages.db.session import get_session
-from packages.domain.enums import SourceTier
+from packages.domain.enums import TIER_A_SOURCE_TIERS, SourceTier
 from packages.research.dispatch import UnknownStrategyError
 
 
@@ -33,7 +37,7 @@ class UnknownSubjectError(Exception):
 
 class SourceGateFailureReason(StrEnum):
     INSUFFICIENT_VERIFIED_SOURCES = "insufficient_verified_sources"
-    MISSING_PRIMARY_RECORD = "missing_primary_record"
+    MISSING_TIER_A_SOURCE = "missing_tier_a_source"
     INSUFFICIENT_DISTINCT_DOMAINS = "insufficient_distinct_domains"
 
 
@@ -42,7 +46,7 @@ class GateResult:
     passed: bool
     reasons: list[SourceGateFailureReason] = field(default_factory=list)
     verified_source_count: int = 0
-    primary_record_count: int = 0
+    tier_a_source_count: int = 0
     distinct_domain_count: int = 0
 
 
@@ -71,14 +75,14 @@ def check_source_gate(subject_id: int, session: Session | None = None) -> GateRe
             active_session.close()
 
     verified_count = len(sources)
-    primary_count = sum(1 for s in sources if s.tier == SourceTier.PRIMARY_RECORD)
+    tier_a_count = sum(1 for s in sources if s.tier in TIER_A_SOURCE_TIERS)
     distinct_domains = {s.domain for s in sources}
 
     reasons: list[SourceGateFailureReason] = []
     if verified_count < strategy.min_verified_sources:
         reasons.append(SourceGateFailureReason.INSUFFICIENT_VERIFIED_SOURCES)
-    if primary_count < strategy.min_primary_records:
-        reasons.append(SourceGateFailureReason.MISSING_PRIMARY_RECORD)
+    if tier_a_count < strategy.min_primary_records:
+        reasons.append(SourceGateFailureReason.MISSING_TIER_A_SOURCE)
     if len(distinct_domains) < strategy.min_distinct_domains:
         reasons.append(SourceGateFailureReason.INSUFFICIENT_DISTINCT_DOMAINS)
 
@@ -86,6 +90,6 @@ def check_source_gate(subject_id: int, session: Session | None = None) -> GateRe
         passed=not reasons,
         reasons=reasons,
         verified_source_count=verified_count,
-        primary_record_count=primary_count,
+        tier_a_source_count=tier_a_count,
         distinct_domain_count=len(distinct_domains),
     )

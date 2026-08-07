@@ -30,18 +30,27 @@ def test_gate_fails_on_insufficient_verified_sources(session: Session, strategy_
     assert result.verified_source_count == 1
 
 
-def test_gate_fails_on_missing_primary_record(session: Session, strategy_id: int) -> None:
+def test_gate_fails_with_no_tier_a_source(session: Session, strategy_id: int) -> None:
+    """RETROSPECTIVE, BOOK, and REFERENCE are all Tier B -- none of PRIMARY_RECORD
+    or CONTEMPORANEOUS, so the gate must still fail this condition. Previously
+    built with a CONTEMPORANEOUS source in the mix, back when only PRIMARY_RECORD
+    counted -- CLAUDE.md's own R1 names "contemporaneous news archive" as a
+    primary/public record, and six other enforcement points already treated
+    PRIMARY_RECORD and CONTEMPORANEOUS as equally Tier A (TIER_A_SOURCE_TIERS),
+    so this gate was the one place they diverged, with no documented reason for
+    it. Rewritten to test the condition correctly scoped, not deleted -- see
+    docs/SCHEMA.md."""
     subject_id = _persist_subject(session, make_subject(strategy_id))
     session.add(make_source(subject_id, url="https://a.com/1", tier=SourceTier.RETROSPECTIVE))
-    session.add(make_source(subject_id, url="https://b.com/1", tier=SourceTier.CONTEMPORANEOUS))
-    session.add(make_source(subject_id, url="https://c.com/1", tier=SourceTier.BOOK))
+    session.add(make_source(subject_id, url="https://b.com/1", tier=SourceTier.BOOK))
+    session.add(make_source(subject_id, url="https://c.com/1", tier=SourceTier.REFERENCE))
     session.commit()
 
     result = check_source_gate(subject_id, session=session)
 
     assert result.passed is False
-    assert SourceGateFailureReason.MISSING_PRIMARY_RECORD in result.reasons
-    assert result.primary_record_count == 0
+    assert SourceGateFailureReason.MISSING_TIER_A_SOURCE in result.reasons
+    assert result.tier_a_source_count == 0
 
 
 def test_gate_fails_on_insufficient_distinct_domains(session: Session, strategy_id: int) -> None:
@@ -71,7 +80,7 @@ def test_gate_passes_when_all_three_conditions_hold(session: Session, strategy_i
     assert result.passed is True
     assert result.reasons == []
     assert result.verified_source_count == 3
-    assert result.primary_record_count == 1
+    assert result.tier_a_source_count == 2  # PRIMARY_RECORD and CONTEMPORANEOUS both count
     assert result.distinct_domain_count == 3
 
 
@@ -99,7 +108,7 @@ def test_bbc_subdomains_collapse_to_one_domain_and_fail_distinct_domain_gate(
     assert SourceGateFailureReason.INSUFFICIENT_DISTINCT_DOMAINS in result.reasons
     assert result.distinct_domain_count == 1
     assert result.verified_source_count == 3
-    assert result.primary_record_count == 1
+    assert result.tier_a_source_count == 2  # PRIMARY_RECORD and CONTEMPORANEOUS both count
 
 
 def test_gate_thresholds_come_from_the_subjects_strategy(session: Session) -> None:
