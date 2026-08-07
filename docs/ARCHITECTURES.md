@@ -78,6 +78,13 @@ Applies to all four:
 - Never the verdict, never the outcome.
 - No names explained, no orientation.
 
+**Selection:** `Episode.cold_open_claim_id`, a nullable FK — one claim, one episode,
+enforced structurally by the column itself, not by convention. The FK is declarative
+only: `packages/db/session.py` never enables SQLite foreign-key enforcement (confirmed
+empirically against a scratch database, not assumed), so `generate_script` has to
+validate at generation time that the referenced claim exists, belongs to this episode's
+claim set, and is thesis-bearing — none of the three are guaranteed by the column alone.
+
 ### 2. Thesis
 `Episode.thesis`, stated plainly in the narrator's voice as a declarative
 sentence. Not a question, not a tease. If it cannot be said in two sentences it is
@@ -89,6 +96,12 @@ Who, where, when — the minimum needed to follow §4.
 - No claim used here that Sequence will also use.
 - If the claim table has no genuine setting material, this shrinks to 30 seconds
   of names and the time goes to Sequence.
+
+**Tagged via `Claim.section = GROUND`** — a deliberate, one-time editorial act, not
+inferred. Claim-intrinsic, not episode-scoped: unlike `thesis_bearing`, tagging a claim
+once holds across every future episode drawn from it, the same way `narratable` does.
+`section` is nullable and null means Sequence, not unreviewed-and-blocked — the reviewer
+tags Ground and Resolution and leaves everything else alone.
 
 ### 4. Sequence — **the thesis mechanism**
 
@@ -122,6 +135,8 @@ claims matter; it decides only how to write the ones it was told matter.
 ### 5. Resolution
 What the record settles, and what it doesn't. Verdict, outcome, aftermath.
 Unresolved threads named as unresolved, once each, without speculation.
+
+Tagged via `Claim.section = RESOLUTION` — same mechanism as Ground, §3.3.
 
 ### 6. Return
 Back to the thesis, paraphrased rather than restated verbatim.
@@ -164,16 +179,24 @@ needed after reading real output.
 ## 5. Manual surface
 
 `SOURCING.md` currently states the per-episode manual work as: pick the case,
-write the thesis, clear the guard checklist — five minutes.
+write the thesis, clear the guard checklist — five minutes. This architecture adds
+three more acts, in two different buckets:
 
-This architecture adds a fourth act: **flag 5–10 thesis-bearing claims** from a
-pool of 40+. Realistically another 3–5 minutes, and unlike `narratable` it does
-not amortize — `thesis_bearing` lives on `EpisodeClaim`, so a second episode from
-the same subject under a different thesis requires flagging again.
+- **Per-subject, once:** tag Ground and Resolution claims via `Claim.section`.
+  ~1 minute per 10 claims. Claim-intrinsic, amortizes across every future episode
+  drawn from the same claim pool, the same way `narratable` does.
+- **Per-episode:** flag 5–10 thesis-bearing claims (3–5 minutes), then pick the
+  cold open from among them (under a minute). Neither amortizes — a second episode
+  from the same subject under a different thesis needs both again, same reasoning
+  as before for `thesis_bearing`, now also true of the cold-open pick.
 
-`SOURCING.md`'s five-minute figure should be corrected to ten. That cost is the
-product, not overhead: it is the act that makes two episodes from one claim pool
-different.
+**In practice: the first episode on a fresh subject costs ~10 minutes** (the
+one-time section-tagging pass plus both per-episode acts); **each subsequent
+episode from the same subject costs ~5** (section tagging already done).
+
+`SOURCING.md`'s five-minute figure needs this same three-bucket correction, not
+just a bigger single number. That cost is the product, not overhead: it is the
+act that makes two episodes from one claim pool different.
 
 ---
 

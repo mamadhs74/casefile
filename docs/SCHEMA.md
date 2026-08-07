@@ -811,6 +811,21 @@ those. If strict chronological sorting is ever needed (e.g. for the `chronologic
 episode architecture below), add a separate nullable `sort_date` alongside this rather
 than tightening it.
 
+**`section: Section | None`** (added later, not in the table above) — `docs/ARCHITECTURES.md`'s
+Ground/Resolution tagging for the `chronological` architecture, claim-intrinsic and
+amortizing the way `narratable` is, unlike episode-scoped `thesis_bearing`. It
+deliberately overloads `null` to mean both "explicitly Sequence" and "not yet
+reviewed" — the two are indistinguishable, unlike `Entity.living`'s tri-state
+(`True`/`False`/`None`), which was built specifically to keep "reviewed false" and
+"unreviewed" apart. The mitigation is generation-time, not schema-level: `generate_script`
+reports the untagged count rather than treating it as ambiguous or blocking. Separating
+the two later, if this turns out to be the wrong call, costs more than adding a column:
+it means a real third state (either a second boolean alongside the existing nullable
+enum, or a four-value `{GROUND, RESOLUTION, SEQUENCE, UNREVIEWED}` enum) plus a one-time
+backfill deciding what every already-null row actually meant — a decision the data
+itself can no longer answer by then, since nothing distinguishes a claim silently
+treated as Sequence in a past generation run from one nobody ever looked at.
+
 **`ClaimSource`** — join table (`claim_id`, `source_id`), renamed from `FactSource`, plus
 `quoted_span`, `span_start`, `span_end` (all `NOT NULL`) — see "Claim extraction" below.
 

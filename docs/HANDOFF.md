@@ -80,7 +80,7 @@ senior-developer commit style with a banned-word list.
 - Media: Azure Neural TTS, faster-whisper forced alignment, ffmpeg render with libass subtitle
   burn-in
 - LLM: Gemini free tier behind a provider interface
-- Tests: **332 passing**, mypy strict clean, ruff clean
+- Tests: **338 passing**, mypy strict clean, ruff clean
 
 **Gemini free tier is 20 requests/day/project.** Two calls per source (claims + entities), so ten
 sources a day, shared with every dry-run and prompt experiment. This is a real constraint on every
@@ -126,6 +126,13 @@ rows), and a per-claim `narratable` re-check (`Claim.before_update` only guards 
 *to* narratable, never away from it — this is the generation-time backstop for that
 gap). Output is still flat concatenation, one claim per line, `date_anchor` order — no
 six-section structure, no thesis-bearing word-weighting yet. That's step 2.
+
+Step 2's schema prerequisites are also done: `Claim.section` (`GROUND`/`RESOLUTION`,
+nullable, null means Sequence) and `Episode.cold_open_claim_id` (nullable FK,
+declarative only — `packages/db/session.py` never enables SQLite foreign-key
+enforcement, confirmed empirically) both exist, migrated and tested. `generate_script`
+itself doesn't read either field yet — building the six-section structure against them
+is next, not done.
 
 **Roughly 28% of the full vision.**
 
@@ -338,11 +345,16 @@ not the next step anymore.
 
 **Step 1 is done:** `EpisodeClaim.thesis_bearing` (migration + model field), and
 `generate_script(session, episode_id, ...)` — the render gate, rules 6 and 7, and the
-narratable re-check, all tested, 332 passing. See §5. New next steps, in order:
+narratable re-check, all tested. **Step 2's schema work is also done:** `Claim.section`
+and `Episode.cold_open_claim_id` (migrations + model fields + tests, 338 passing). See
+§5. `generate_script` doesn't read either field yet — that's the remaining part of step
+2. New next steps, in order:
 
-1. **Step 2: the six-section structure.** Cold open, thesis, ground, sequence,
-   resolution, return, per ARCHITECTURES.md v2 §3 — including the thesis-bearing 60/40
-   word-weighting inside Sequence, which needs actual composition, not concatenation.
+1. **Step 2, the generator changes.** Build the six-section structure against
+   `Claim.section` and `Episode.cold_open_claim_id` — cold open, thesis, ground,
+   sequence, resolution, return, per ARCHITECTURES.md v2 §3. Rule 4 (word budget)
+   checked-and-reported, not enforced yet; Return emits `Episode.thesis` verbatim as a
+   visible placeholder, since real paraphrase needs the composition step 3 doesn't have.
 2. **Step 3: the LLM pass.** Composing a claim to a word target (rule 4's "satisfy" half,
    not just its "check" half) is the one place flat concatenation genuinely can't reach —
    this is where a model call finally becomes necessary.

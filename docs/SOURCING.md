@@ -73,7 +73,8 @@ Stage 1's primary artifact. Not prose — structured records.
   "confidence": "established | reported | contested",
   "date_anchor": "1922-03-28",
   "entities": ["e02"],
-  "narratable": true
+  "narratable": true,
+  "section": "ground" | "resolution" | null
 }
 ```
 
@@ -193,6 +194,11 @@ Everything else. Source retrieval, claim extraction with human confirmation, ent
 resolution, TTS, alignment, shot selection, render, thumbnail, upload, analytics
 ingestion, cross-platform scheduling.
 
-The manual surface is: **pick the case, write the thesis, clear the guard checklist.**
-Call it five minutes an episode. That five minutes is what keeps the other ninety-five
-percent monetizable.
+The manual surface is: **pick the case, write the thesis, clear the guard checklist** —
+plus, per `docs/ARCHITECTURES.md`'s `chronological` architecture, two more acts in two
+different buckets. **Per-subject, once:** tag Ground/Resolution claims via
+`Claim.section`, ~1 minute per 10 claims, amortizing across every future episode.
+**Per-episode:** flag 5–10 thesis-bearing claims (3–5 minutes) and pick the cold open
+from among them (under a minute), neither amortizing. In practice: **~10 minutes for
+the first episode on a fresh subject, ~5 for each one after.** That cost is what keeps
+the rest of the pipeline monetizable.
