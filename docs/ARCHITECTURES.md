@@ -200,16 +200,22 @@ Cold open 0:30 · thesis 1:00 · context build 8:30 · case as consequence 7:00 
 
 ---
 
-## Where these risk collapsing into each other — flagged, not solved
+## Where these collapse into each other
 
-**`chronological` and `investigation_led` are the highest collision risk.** Both are
-fundamentally ordered-narrative structures. Their entire structural difference rests on
-event-order vs. discovery-order being genuinely different sequences — and neither order
-is a field the schema actually captures (see both sections' gaps above). For a case where
-the investigation tracked the crime closely in time, hand-authored ordering could produce
-the same section-by-section sequence under both architecture labels, with only the framing
-language differing — which is precisely the Bucket 1 failure this whole document exists
-to avoid, one level up from where the docs already flagged it.
+**`chronological` and `investigation_led` are not a collision risk — they are not
+distinguishable at generation time today, full stop.** `EpisodeClaim` stores only
+`episode_id`, `claim_id`, `position` — an untagged integer. Nothing records which axis a
+given ordering represents, and nothing else in `Claim` does either: `claim_type`
+(`FACT`/`CONTEMPORANEOUS_REPORT`) is epistemic, not temporal, and `date_anchor` describes
+when the underlying event happened, not when it was discovered or reported. Two episodes
+built from the same claim pool, one labeled `chronological` and one
+`investigation_led`, can carry byte-identical `EpisodeClaim` rows — same `claim_id`s,
+same `position` values — and nothing in the schema would notice. Today, the entire
+difference between the two is narration language layered over one identical, untagged
+ordering mechanism — `docs/POLICY.md`'s Bucket 1 failure exactly as named
+(*"different wording over an identical skeleton is still the same skeleton"*), not a
+risk of it happening. See `docs/SCHEMA.md`'s Episode section for the same finding
+recorded there. **Effective count for this document: three architectures, not four.**
 
 **`context_first` and `chronological` risk converging in their back half.** Once
 `context_first` reaches section 4 ("the case as consequence"), it's narrating events

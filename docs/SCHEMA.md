@@ -1841,6 +1841,58 @@ reconciliation exists to produce the claim type their structure depends on. Not 
 here — recorded so the two aren't mistaken for equally buildable alongside the other
 four.
 
+### Finding: `investigation_led` is not distinguishable from `chronological` at generation
+time — current reality, not a risk
+
+`EpisodeClaim` stores exactly `episode_id`, `claim_id`, `position` — an untagged integer.
+Nothing on `EpisodeClaim` or `Claim` records *which axis* a given ordering represents.
+`claim_type` (`FACT` vs. `CONTEMPORANEOUS_REPORT`) is epistemic — how a fact is known —
+not temporal; `date_anchor` describes when the underlying event happened, not when it was
+discovered or reported. Two episodes on the same claim pool, one built `chronological`
+and one `investigation_led`, can carry byte-identical `EpisodeClaim` rows — same
+`claim_id`s, same `position` values — and nothing in the schema would notice. **Today, the
+only difference between the two is narration language layered over an identical,
+untagged ordering mechanism — which is `docs/POLICY.md`'s Bucket 1 failure
+(*"different wording over an identical skeleton is still the same skeleton"*), recurring
+one layer up from where it was already flagged for `generation_fingerprint` above.** Not
+fixed here.
+
+### Finding: `record_forward`'s minimum-claims-per-source threshold is a selection-time
+check, not a schema gap — and that's a different kind of missing than `investigation_led`'s
+
+The data this check needs already exists in full: `SELECT source_id, COUNT(*) FROM claim
+JOIN claim_source ... GROUP BY source_id` is the exact query already run against subject
+8 above (17/17/45). No new column, no new table — this is a readiness check that belongs
+at architecture-selection time, the same shape as `packages/research/gate.py`'s R1
+source-diversity gate: a computed check against rows that already exist. The only open
+question is what the threshold number should be, a product decision, not a
+data-availability one.
+
+**Contrast stated plainly, because it matters:** `record_forward`'s gap is "the data
+exists, the check is unwritten." `investigation_led`'s gap, above, is "the data doesn't
+exist to check in the first place." Two different kinds of missing — one is a query away,
+the other requires a new ordering axis the schema doesn't capture at all (a candidate
+addition, not adopted here: `MIN(Source.published_date)` across a claim's `ClaimSource`
+joins is derivable today with no migration, but is source-level not claim-level, silent
+on `FACT` claims, and `published_date` is nullable and often absent; a genuine fix would
+be a new nullable column, better placed on `ClaimSource` than `Claim` for the same
+reasoning `match_rationale` lives on `EntityMatch` rather than `Entity` — trivial as a
+column, not trivial to populate, since `claim_extraction.py` has no capability to ask a
+single source's text when something was discovered, and all 79 existing claims would sit
+`NULL` until re-extracted).
+
+### The effective architecture space is 3, not 6
+
+`misconception` and `open_question` need cross-source reconciliation that doesn't exist.
+`investigation_led` needs an ordering axis the schema doesn't capture, and today produces
+nothing generation-time-distinguishable from `chronological`. **Buildable today:
+`chronological`, `record_forward`, `context_first`.** Stated plainly because it's load-
+bearing for the uniqueness guarantee above: "Cross-user uniqueness" specifies the
+combinatorial guarantee as **thesis × architecture × ordered claim subset** — and the
+architecture dimension of that product is currently half its documented size, three
+usable values against six named ones, before any thesis-quality or claim-selection
+question is even asked.
+
 ---
 
 ## VariationProfile
