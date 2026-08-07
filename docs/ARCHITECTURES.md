@@ -70,6 +70,10 @@ One claim, pulled out of chronological order. Its **form** is
 
 Applies to all four:
 - Exactly one claim.
+- Must be one of the thesis-bearing claims. The cold open is chosen from
+  claims the human already flagged; `cold_open_style` selects among those. A
+  heuristic picking from the whole pool would give the same answer every
+  time, which is the failure §4 exists to prevent.
 - It must also appear in Sequence at its correct chronological position.
 - Never the verdict, never the outcome.
 - No names explained, no orientation.
