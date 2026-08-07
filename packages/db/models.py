@@ -32,6 +32,7 @@ from packages.domain.enums import (
     Platform,
     PublicationStatus,
     ResolutionStatus,
+    Section,
     SourceTier,
     SubjectStatus,
     ThumbnailComposition,
@@ -193,6 +194,13 @@ class Claim(TimestampedModel, table=True):
     least one source and every one of them is Tier A
     (packages.domain.enums.TIER_A_SOURCE_TIERS); this is enforced at the
     persistence layer, not just checked at write time by convention.
+
+    section -- docs/ARCHITECTURES.md sec 3's Ground/Resolution tagging for
+    the `chronological` architecture. Claim-intrinsic, not episode-scoped,
+    unlike EpisodeClaim.thesis_bearing -- see Section's own docstring.
+    Nullable, no listener: null means Sequence, and there is no sourcing
+    or narratability invariant here for a listener to defend the way there
+    is for narratable above.
     """
 
     __tablename__ = "claim"
@@ -210,6 +218,7 @@ class Claim(TimestampedModel, table=True):
     # tightening it -- see docs/SCHEMA.md.
     date_anchor: str | None = None
     narratable: bool = Field(default=False)
+    section: Section | None = Field(default=None)
 
 
 class ClaimSource(TimestampedModel, table=True):
@@ -374,6 +383,18 @@ class Episode(TimestampedModel, table=True):
     block a user's work: LOCAL_ONLY means exactly that happened, generation
     proceeded anyway, and only the local UNIQUE constraint below actually
     guarded it.
+
+    cold_open_claim_id -- docs/ARCHITECTURES.md sec 3.1's cold-open
+    selection. The FK is declarative only: packages/db/session.py never
+    sets PRAGMA foreign_keys = ON, so SQLite does not enforce it at
+    runtime (confirmed empirically against a scratch database, not
+    assumed -- see scripts/migrate_episode_cold_open_claim_id.py). No
+    listener checks that the referenced claim exists, belongs to this
+    episode's claim set, or is thesis-bearing -- all three are
+    generation-time validation, deliberately deferred, not persistence-
+    layer guarantees. This is the same already-documented Episode gap
+    (docs/SCHEMA.md finding #13's persistence-layer half) joined by a
+    second field, not a new one.
     """
 
     __tablename__ = "episode"
@@ -395,6 +416,7 @@ class Episode(TimestampedModel, table=True):
     architecture: EpisodeArchitecture | None = None
     generation_fingerprint: str | None = Field(default=None, index=True)
     uniqueness_check: UniquenessCheckStatus = Field(default=UniquenessCheckStatus.NOT_CHECKED)
+    cold_open_claim_id: int | None = Field(default=None, foreign_key="claim.id")
 
     def advance_to(self, target: PipelineStage) -> None:
         """Move to `target`, raising IllegalStageTransitionError if not legal.

@@ -19,11 +19,12 @@ from packages.db.listeners import NarratableSourcingError, NonNarratableClaimErr
 from packages.db.models import (
     Claim,
     ClaimEntity,
+    Episode,
     EpisodeClaim,
     Source,
     TimestampedModel,
 )
-from packages.domain.enums import SourceTier
+from packages.domain.enums import Section, SourceTier
 from tests.factories import (
     make_claim,
     make_claim_source,
@@ -384,6 +385,109 @@ def test_episode_claim_thesis_bearing_set_true_persists(
     reloaded = session.get(EpisodeClaim, episode_claim_id)
     assert reloaded is not None
     assert reloaded.thesis_bearing is True
+
+
+# --------------------------------------------------------------------------
+# Claim.section -- docs/ARCHITECTURES.md sec 3's Ground/Resolution tagging.
+# Claim-intrinsic, no listener: see Section's own docstring for why null
+# (Sequence) needs none of narratable's or thesis_bearing's enforcement.
+# --------------------------------------------------------------------------
+
+
+def test_claim_section_defaults_none(session: Session, strategy_id: int) -> None:
+    subject_id = _persist(session, make_subject(strategy_id))
+    claim_id = _persist(session, make_claim(subject_id))
+
+    claim = session.get(Claim, claim_id)
+    assert claim is not None
+    assert claim.section is None
+
+
+@pytest.mark.parametrize("section", [Section.GROUND, Section.RESOLUTION])
+def test_claim_section_round_trips_through_persistence(
+    session: Session, strategy_id: int, section: Section
+) -> None:
+    subject_id = _persist(session, make_subject(strategy_id))
+    claim_id = _persist(session, make_claim(subject_id))
+
+    claim = session.get(Claim, claim_id)
+    assert claim is not None
+    claim.section = section
+    session.add(claim)
+    session.commit()
+
+    # Expire and re-fetch rather than trust the same in-memory object --
+    # this proves the value round-tripped through the database, not just
+    # that the Python attribute held what we set on it.
+    session.expire(claim)
+    reloaded = session.get(Claim, claim_id)
+    assert reloaded is not None
+    assert reloaded.section == section
+
+
+# --------------------------------------------------------------------------
+# Episode.cold_open_claim_id -- docs/ARCHITECTURES.md sec 3.1's cold-open
+# selection. The FK is declarative only -- packages/db/session.py never
+# sets PRAGMA foreign_keys = ON, so nothing at the persistence layer stops
+# a dangling reference. Asserted directly below, not left only in the
+# model's docstring, same shape as the narratable-degradation test in
+# tests/test_script_chronological.py.
+# --------------------------------------------------------------------------
+
+
+def test_episode_cold_open_claim_id_defaults_none(session: Session, strategy_id: int) -> None:
+    subject_id = _persist(session, make_subject(strategy_id))
+    variation_profile_id = _make_variation_profile_id(session, strategy_id)
+    episode_id = _persist(session, make_episode(subject_id, variation_profile_id))
+
+    episode = session.get(Episode, episode_id)
+    assert episode is not None
+    assert episode.cold_open_claim_id is None
+
+
+def test_episode_cold_open_claim_id_round_trips_through_persistence(
+    session: Session, strategy_id: int
+) -> None:
+    subject_id = _persist(session, make_subject(strategy_id))
+    claim_id = _persist(session, make_claim(subject_id))
+    variation_profile_id = _make_variation_profile_id(session, strategy_id)
+    episode_id = _persist(session, make_episode(subject_id, variation_profile_id))
+
+    episode = session.get(Episode, episode_id)
+    assert episode is not None
+    episode.cold_open_claim_id = claim_id
+    session.add(episode)
+    session.commit()
+
+    session.expire(episode)
+    reloaded = session.get(Episode, episode_id)
+    assert reloaded is not None
+    assert reloaded.cold_open_claim_id == claim_id
+
+
+def test_episode_cold_open_claim_id_accepts_dangling_reference(
+    session: Session, strategy_id: int
+) -> None:
+    """The gap the model's own docstring names: the FK is declarative
+    only. Confirmed directly here, not just asserted in prose -- a claim
+    id that does not exist anywhere in the database persists without
+    objection, because nothing in this codebase's actual running
+    connections ever turns PRAGMA foreign_keys on."""
+    subject_id = _persist(session, make_subject(strategy_id))
+    variation_profile_id = _make_variation_profile_id(session, strategy_id)
+    episode_id = _persist(session, make_episode(subject_id, variation_profile_id))
+
+    nonexistent_claim_id = 999_999_999
+    episode = session.get(Episode, episode_id)
+    assert episode is not None
+    episode.cold_open_claim_id = nonexistent_claim_id
+    session.add(episode)
+    session.commit()  # must not raise -- no listener, no FK enforcement
+
+    session.expire(episode)
+    reloaded = session.get(Episode, episode_id)
+    assert reloaded is not None
+    assert reloaded.cold_open_claim_id == nonexistent_claim_id
 
 
 # --------------------------------------------------------------------------

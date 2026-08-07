@@ -114,6 +114,32 @@ class ClaimConfidence(StrEnum):
     CONTESTED = "contested"
 
 
+class Section(StrEnum):
+    """docs/ARCHITECTURES.md sec 3's claim-to-section allocation for the
+    `chronological` architecture. Claim-intrinsic, not episode-scoped --
+    a Ground or Resolution claim is that regardless of which episode or
+    thesis it's used under, unlike EpisodeClaim.thesis_bearing, which is
+    thesis-relative by design. Amortizes across every future episode
+    drawn from the same claim the way narratable does.
+
+    No SEQUENCE member: null on Claim.section *is* Sequence, not a third
+    value standing in for it -- the reviewer tags Ground and Resolution
+    and leaves everything else alone. This deliberately overloads null
+    to mean both "explicitly Sequence" and "not yet reviewed" -- the two
+    are indistinguishable, unlike Entity.living's tri-state, which was
+    built specifically to keep "reviewed false" and "unreviewed" apart.
+    generate_script reports the untagged count rather than treating it
+    as an error, so this is a considered choice, not the same gap.
+
+    No COLD_OPEN member either -- cold-open placement is
+    Episode.cold_open_claim_id, a pointer, not a tag on the claim
+    itself. A cold-open claim's own section is typically null, since it
+    must also appear in Sequence at its correct position."""
+
+    GROUND = "ground"
+    RESOLUTION = "resolution"
+
+
 class EntityRole(StrEnum):
     VICTIM = "victim"
     SUSPECT = "suspect"
