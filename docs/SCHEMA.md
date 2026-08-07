@@ -1818,6 +1818,29 @@ exists and has never been exercised by a real write. "Enforced now," as this doc
 describes the exact-duplicate floor above, is true of the schema, not yet of any actual
 generation path, because there is no generation path yet.
 
+### Finding: two of six `EpisodeArchitecture` values are unbuildable until reconciliation exists
+
+`docs/SOURCING.md`'s variation manifest gives `misconception` ("states the popular
+version, then dismantles it") and `open_question` ("frames one unresolved point and
+examines evidence both ways") Shapes that both require contested material — a claim
+whose truth is genuinely disputed, not just uncertain. `packages/research/claim_extraction.py`'s
+provider schema permits exactly `{FACT, CONTEMPORANEOUS_REPORT, INFERENCE}` for
+`claim_type`; `DISPUTED` is explicitly excluded, reserved for the cross-source
+reconciliation stage named in this document's Claim section that doesn't exist yet.
+`ClaimConfidence.CONTESTED` is only ever reachable through `claim_type == DISPUTED` (see
+`_CONFIDENCE_BY_CLAIM_TYPE`), so it inherits the same block. Confirmed empirically, not
+just structurally: subject 8's full 79-claim table — three sources, two extraction
+passes' worth of real runs — contains zero `DISPUTED` and zero `CONTESTED` claims.
+
+**The effective architecture space today is 4, not 6.** `chronological`,
+`investigation_led`, `record_forward`, and `context_first` don't need contested material
+per their own Shape lines and can be built against what automated extraction actually
+produces. `misconception` and `open_question` cannot be built as anything more than a
+different narration style wrapped around the same underlying claim set, until
+reconciliation exists to produce the claim type their structure depends on. Not fixed
+here — recorded so the two aren't mistaken for equally buildable alongside the other
+four.
+
 ---
 
 ## VariationProfile
