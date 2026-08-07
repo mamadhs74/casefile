@@ -80,7 +80,7 @@ senior-developer commit style with a banned-word list.
 - Media: Azure Neural TTS, faster-whisper forced alignment, ffmpeg render with libass subtitle
   burn-in
 - LLM: Gemini free tier behind a provider interface
-- Tests: **324 passing**, mypy strict clean, ruff clean
+- Tests: **332 passing**, mypy strict clean, ruff clean
 
 **Gemini free tier is 20 requests/day/project.** Two calls per source (claims + entities), so ten
 sources a day, shared with every dry-run and prompt experiment. This is a real constraint on every
@@ -116,12 +116,16 @@ against real sources.
 
 Channels exist as schema only, no OAuth.
 
-**Script generation** — `packages/script/chronological.py` exists and is seam-tested (an
-in-memory scratch DB, `NarratableSourcingError` confirmed firing on a deliberately
-Tier-B-sourced claim), but it is a deliberately dumb plumbing proof, not the generator
-`docs/ARCHITECTURES.md` v2 specifies. It takes `subject_id` + a raw claim-id list rather
-than `episode_id`, ignores its own `architecture` parameter entirely, has no six-section
-structure or thesis-bearing mechanism, and does not refuse below the 40-claim minimum.
+**Script generation** — step 1 of the build is done. `generate_script(session,
+episode_id, *, min_claim_count=40)` takes `episode_id`, not `subject_id` plus a raw
+claim-id list; thesis, architecture, and thesis-bearing flags all come off
+`Episode`/`EpisodeClaim`. Enforces the render gate (rule 8 — closes finding #13 at
+generation time, not at persistence, see `docs/SCHEMA.md`), rules 6 and 7 (thesis-bearing
+count 5–10, total claim count ≥ 40, the latter injectable so tests don't need 40 real
+rows), and a per-claim `narratable` re-check (`Claim.before_update` only guards the flip
+*to* narratable, never away from it — this is the generation-time backstop for that
+gap). Output is still flat concatenation, one claim per line, `date_anchor` order — no
+six-section structure, no thesis-bearing word-weighting yet. That's step 2.
 
 **Roughly 28% of the full vision.**
 
@@ -326,19 +330,20 @@ identical Veridian-based blocklist) or a Cloudflare JS challenge, same shape as 
 `subject_id=8`'s single CONTEMPORANEOUS source stands as-is; finding a second and third domain is
 not the next step anymore.
 
-`docs/ARCHITECTURES.md` (v2, authoritative) is the spec the generator is built against. New next
-steps, in order:
+`docs/ARCHITECTURES.md` (v2, authoritative) is the spec the generator is built against.
 
-1. **`EpisodeClaim.thesis_bearing`.** The column ARCHITECTURES.md §4 names as the thesis
-   mechanism's schema requirement — a migration following
-   `scripts/migrate_entity_living.py`'s safety posture (this project has no Alembic; migrations are
-   one-off scripts against `data/casefile.db` directly).
-2. **The real generator**, against ARCHITECTURES.md v2's `chronological` spec: `episode_id` in, not
-   `subject_id` plus a raw claim-id list — thesis, architecture, and thesis-bearing flags read from
-   `Episode`/`EpisodeClaim`, not passed by hand. `packages/script/chronological.py` proved the
-   plumbing; it is not this generator — see finding #29 and §6.
-3. **A rendered episode.** First real end-to-end output, against whichever subject actually clears
-   R1's gate by then.
+**Step 1 is done:** `EpisodeClaim.thesis_bearing` (migration + model field), and
+`generate_script(session, episode_id, ...)` — the render gate, rules 6 and 7, and the
+narratable re-check, all tested, 332 passing. See §5. New next steps, in order:
+
+1. **Step 2: the six-section structure.** Cold open, thesis, ground, sequence,
+   resolution, return, per ARCHITECTURES.md v2 §3 — including the thesis-bearing 60/40
+   word-weighting inside Sequence, which needs actual composition, not concatenation.
+2. **Step 3: the LLM pass.** Composing a claim to a word target (rule 4's "satisfy" half,
+   not just its "check" half) is the one place flat concatenation genuinely can't reach —
+   this is where a model call finally becomes necessary.
+3. **A rendered episode.** First real end-to-end output, against whichever subject actually
+   clears R1's gate by then.
 
 Why Borden and not Hinterkaifeck: Hinterkaifeck's Tier A material is 1922 German police and inquest
 paperwork, almost certainly not on the open web. All four fetched sources are non-Tier-A. It also
