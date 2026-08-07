@@ -516,6 +516,79 @@ today's failure.
 two independent implementations of "what counts as one domain" drifting apart would
 be a real bug, not a style nit — R1's gate counts distinct domains for independence.
 
+### Finding: `POST /subjects/{id}/sources` bypasses every check the fetch layer exists
+to enforce, including the Tier A heuristic — not fixed here, recorded as a finding
+
+Everything above this point in this section — the Tier C blocklist, the idempotent
+`(subject_id, url)` check, robots.txt, rate limiting, `EmptyExtractionError`'s 40-word
+floor, the domain-reference-sample boilerplate check, both dedup checks, and
+`assign_initial_tier()`'s hard rule that heuristics may never write a Tier A value —
+is enforced by `SourceFetcher.fetch_source()` alone. It is not enforced by the API.
+
+`apps/api/routers/sources.py::create_source` (`POST /subjects/{id}/sources`) takes a
+`SourceCreate` payload (`apps/api/schemas.py:125-136`) and persists it almost
+unchanged:
+
+```python
+class SourceCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    url: str
+    publisher: str
+    title: str
+    published_date: date | None = None
+    retrieved_at: datetime | None = None
+    tier: SourceTier
+    text_path: str
+    text_sha256: str
+    word_count: int
+```
+
+```python
+@router.post("/{subject_id}/sources", response_model=SourceRead, status_code=201)
+def create_source(subject_id: int, payload: SourceCreate, session: SessionDep) -> SourceRead:
+    get_subject_or_404(session, subject_id)
+    source = Source(
+        subject_id=subject_id,
+        retrieved_at=payload.retrieved_at or datetime.now(UTC),
+        **payload.model_dump(exclude={"retrieved_at"}),
+    )
+    session.add(source)
+    session.commit()
+    session.refresh(source)
+    return SourceRead.model_validate(source)
+```
+
+`tier`, `text_sha256`, and `word_count` are caller-supplied, full stop. Nothing on this
+path re-derives any of them from real content: no network request is made, so there is
+nothing to check against the Tier C blocklist or robots.txt; no extraction runs, so
+`word_count` is never verified against whatever `text_path` names; no hash is computed
+from actual bytes, so `text_sha256` doesn't have to be the sha256 of anything that
+exists, which also means neither dedup check (`_find_by_hash`, subject-scoped, or
+`_find_domain_wide_duplicate`, cross-subject — both described above) can ever fire,
+because both key off a hash the caller invented rather than one the pipeline computed.
+Most directly: `assign_initial_tier()`'s one hard invariant — heuristics may write Tier
+B or `UNVERIFIED`, never Tier A, specifically so that no source can reach Tier A status
+without a human having read it — has no equivalent here at all. This path doesn't run
+a wrong heuristic; it runs no heuristic. A caller can `POST` `tier: "primary_record"`
+against a URL that was never fetched, a `word_count` that was never counted, and a
+`text_sha256` that matches no file on disk, and that row satisfies `check_source_gate()`'s
+condition 1 (verified count) and condition 2 (Tier A count) immediately, for a source
+nobody has read.
+
+This is not hypothetical misuse of a general-purpose CRUD endpoint; it's the specific
+shape of gap `docs/SOURCING.md`'s Tier A/B/C discipline and this section's own
+"Extraction specificity" investigation (below) exist to prevent, reachable through a
+second, unguarded door. Today it is only exercised by `tests/factories.py::make_source`
+and `tests/test_api_sources.py::_source_payload` — fixture-building, not a real subject
+— so nothing has gone through this path for a case that matters. It remains a route the
+running API serves unconditionally; there's no auth layer anywhere in this project yet
+to note as a mitigating factor. Recorded as a finding, not fixed: fixing it is a design
+choice (remove the route, require it to only ever echo an already-fetched `Source`,
+recompute `text_sha256`/`word_count` server-side from `text_path`, forbid `tier` above
+what `assign_initial_tier()` would allow) and none of those is obviously right without
+first deciding what, if anything, this endpoint is *for* — nothing currently calls it
+outside tests, so the API surface may be solving a problem that doesn't exist yet.
+
 ### Extraction specificity
 
 Word count alone is not a specificity check. The defect this section addresses is
