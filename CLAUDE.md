@@ -162,6 +162,14 @@ That correlation is the real product.
 - Never issue POST, PATCH, or DELETE against a server you did not start yourself in
   this session.
 - New findings-ledger entries in `docs/SCHEMA.md` get one paragraph, no more.
+- Two tiers for whether to propose before touching anything:
+  - **Tier 1 — write it, then show the diff. No proposal step.** New standalone
+    scripts that add no logic, read-only queries, test additions, doc edits, type
+    annotations.
+  - **Tier 2 — propose first, wait for confirmation.** Anything touching
+    `packages/db/models.py`, `listeners.py`, `gate.py`, `tiering.py`, `Strategy`
+    thresholds, migrations, or any write to `data/casefile.db`.
+  - If unsure which tier, it's Tier 2.
 
 ## Commit style
 
