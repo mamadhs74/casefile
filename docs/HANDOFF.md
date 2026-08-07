@@ -177,9 +177,11 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
 
 ### Documentation asserting enforcement that doesn't exist
 
-13. **The thesis render gate does not exist.** `SCHEMA.md` says thesis and architecture are
-    "enforced non-empty/non-null at a render gate check"; `POLICY.md` R1 says "Render fails without
-    one." No such check exists in code.
+13. **The thesis render gate is partially closed.** `generate_script()`
+    (`packages/script/chronological.py`) now enforces it at generation time — raises if
+    `Episode.thesis` is empty or `Episode.architecture` is null, before any claim is queried. It
+    still doesn't exist at the persistence layer: nothing stops an `Episode` from being *created
+    and stored* with an empty thesis or null architecture in the first place. See `docs/SCHEMA.md`.
 14. **`generation_fingerprint` is never computed.** The column and `UniqueConstraint(subject_id,
     generation_fingerprint)` are real; nothing anywhere computes a fingerprint. The constraint has
     never fired.
