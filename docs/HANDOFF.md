@@ -93,6 +93,18 @@ session — never retry a failed run without deciding to spend the quota.
 **Media pipeline**, validated end to end in `experiments/slice_01`: 8.1 min render for a 20-minute
 episode static, 14.0 min with Ken Burns.
 
+**The seam between `packages/script` and the render path has now actually been crossed, once.**
+A real `SectionedScript.text` (the success-path fixture's output) was pushed through
+`experiments/slice_01`'s narrate → align → shots → compose chain with zero code changes to
+either side — Azure TTS, faster-whisper alignment, ffmpeg render, real subtitle burn-in, all
+against genuine `generate_script` output for the first time.
+`experiments/slice_01/output/slice_delivery_casefile_seam_test.mp4` (19.3s, 1920x1080,
+h264/AAC). Confirmed the seam works; confirmed nothing else does yet — no claim-to-image
+mapping exists (the render used the unrelated Hinterkaifeck stand-in photos, since no other
+images exist anywhere), no music, no thumbnail. One tracked fixture
+(`experiments/slice_01/work/subs.ass`) was overwritten mid-test and restored via `git
+checkout` immediately after; everything else touched is gitignored.
+
 **Stage 1 data layer**, both halves:
 
 *Claims* — `Claim`, `Entity`, `Episode` with thesis, architecture, `generation_fingerprint`. The
@@ -359,9 +371,16 @@ next steps, in order:
 1. **Step 3: the LLM pass.** Composing a claim to a word target (rule 4's "satisfy" half,
    not just its "check" half, which step 2 already reports) is the one place flat
    concatenation genuinely can't reach, and the same gap blocks Return's real paraphrase
-   — this is where a model call finally becomes necessary.
+   — this is where a model call finally becomes necessary. **Granularity is decided:
+   per-section, not per-claim.** One call per claim (Sequence's 8 thesis-bearing + ~27
+   others, plus Return) is ~36 calls for a single episode — almost double the entire
+   daily quota, before Ground or Resolution need anything. One call per section
+   (Sequence, Ground, Resolution, Return; Cold Open and Thesis need no composition call
+   at all) is **4–5 Gemini calls per episode**, comfortably inside 20/day, with headroom
+   for a retry when a section misses its word budget.
 2. **A rendered episode.** First real end-to-end output, against whichever subject actually
-   clears R1's gate by then.
+   clears R1's gate by then. The render path itself is no longer the unknown — see §5's
+   seam-test entry — what's missing now is claim-to-image mapping, not the render.
 
 Why Borden and not Hinterkaifeck: Hinterkaifeck's Tier A material is 1922 German police and inquest
 paperwork, almost certainly not on the open web. All four fetched sources are non-Tier-A. It also

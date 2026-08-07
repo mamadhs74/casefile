@@ -27,7 +27,18 @@ produces one episode per claim pool.
 
 ## 2. Time and word budget
 
-Target: **20 minutes**. Word count is **derived, not fixed**:
+**Target: 20 minutes — derived from the thesis mechanism's own floor, not arbitrary.**
+Checked against real claim data: at 8 minutes, Sequence's non-thesis-bearing composed
+target falls to ~11 words/claim, below the observed natural claim length (15.67 words
+average, the 45-claim Borden pool — the only real Tier-A claim data this project has).
+Below that floor, composing a claim stops being expansion and becomes compression, and
+§3.4's 60/40 emphasis split stops distinguishing thesis-bearing claims from anything,
+because there's no room left between "elaborated" and "stated and moved past." 20
+minutes is roughly the shortest runtime at which that split still has room to work.
+**Recheck this if observed claim length changes materially** — it rests on one pool of
+real data from one case, not a general fact about narration.
+
+Word count is **derived, not fixed**:
 
 ```
 total_words = 20 * VariationProfile.narration_wpm
@@ -47,10 +58,36 @@ whatever that total comes to.
 
 Sequence at 65% is a deliberate claim: this architecture is mostly the events.
 
-**Minimum claim count: 40** distinct claims. Distinct, not merely present —
-`docs/SCHEMA.md` records that claim extraction has no dedup, so a pool of 45 rows
-may hold 8 facts. Until dedup exists this count must be eyeballed, and the
-generator refuses below 40 rather than padding.
+**Minimum claim count: not one fixed number — it depends on which mechanism is
+generating the words, and today's two honest readings don't agree with each other or
+with the "40" previously written here.**
+
+- **Under today's actual mechanism (flat concatenation, no composition):** a 20-minute
+  episode at real observed claim length (15.67–18.41 words/claim, depending on pool)
+  needs roughly **140–190 distinct claims** to actually fill 20 minutes —
+  `claim-derived words (89% of total) ÷ average claim length`. Below that, the episode
+  is shorter than 20 minutes regardless of what the floor says; the floor checks a
+  count, it doesn't create length.
+- **Under §3.4's composed-word rule** (8 thesis-bearing claims at ~145 words each, the
+  rest at ~25–30 words each — a target that only means anything once real composition,
+  step 3, exists): Sequence alone needs roughly **35 claims**, close to the 40 written
+  here before, before Ground or Resolution need any claims of their own.
+
+Neither of these is 40. **This is a step-3-dependent number, not a fixed one** — the
+concatenation-era floor and the composition-era floor are different claim counts, and
+writing one bare "40" here conflated them. `MIN_TOTAL_CLAIM_COUNT` in
+`packages/script/chronological.py` is unchanged pending a decision between these two
+readings — this is a documentation correction only.
+
+**Drift risk, same shape as the R1 gate's condition-2 drift (`docs/SCHEMA.md`):** the
+claim-count floor currently lives in three places that can silently disagree —
+this section, rule 7 (`§4`), and `MIN_TOTAL_CLAIM_COUNT` in code — with nothing tying
+them together. The single source of truth should be the code constant. This section
+and rule 7 should cite `MIN_TOTAL_CLAIM_COUNT` by name rather than restate its literal
+value, the same way `packages/research/extraction.py`'s own floor is referred to by
+name (`MIN_EXTRACTED_WORD_COUNT`) elsewhere in this project rather than copied as a
+bare number wherever it matters. Not applied here — this paragraph names the fix, it
+doesn't make it.
 
 ---
 
