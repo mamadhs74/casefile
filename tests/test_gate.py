@@ -53,6 +53,28 @@ def test_gate_fails_with_no_tier_a_source(session: Session, strategy_id: int) ->
     assert result.tier_a_source_count == 0
 
 
+def test_gate_passes_on_contemporaneous_source_alone_no_primary_record(
+    session: Session, strategy_id: int
+) -> None:
+    """The other side of the change: a CONTEMPORANEOUS source with zero
+    PRIMARY_RECORD sources must now satisfy condition 2 on its own -- this is
+    the exact case the widening exists to allow (CLAUDE.md's R1 names
+    "contemporaneous news archive" as a primary/public record), and the exact
+    shape a real historical case with surviving period press coverage but no
+    digitized primary record actually has. See docs/SCHEMA.md."""
+    subject_id = _persist_subject(session, make_subject(strategy_id))
+    session.add(make_source(subject_id, url="https://a.com/1", tier=SourceTier.CONTEMPORANEOUS))
+    session.add(make_source(subject_id, url="https://b.com/1", tier=SourceTier.RETROSPECTIVE))
+    session.add(make_source(subject_id, url="https://c.com/1", tier=SourceTier.BOOK))
+    session.commit()
+
+    result = check_source_gate(subject_id, session=session)
+
+    assert result.passed is True
+    assert result.reasons == []
+    assert result.tier_a_source_count == 1
+
+
 def test_gate_fails_on_insufficient_distinct_domains(session: Session, strategy_id: int) -> None:
     subject_id = _persist_subject(session, make_subject(strategy_id))
     session.add(make_source(subject_id, url="https://a.com/1", tier=SourceTier.PRIMARY_RECORD))
