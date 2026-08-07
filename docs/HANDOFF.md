@@ -53,8 +53,14 @@ limitations."*
 
 ## 3. How I want to work
 
-- **Propose before you code.** Don't apply changes until I confirm — this includes changes you
-  think are prerequisites.
+- Two tiers for whether to propose before touching anything, per `CLAUDE.md`:
+  - **Tier 1 — write it, then show the diff. No proposal step.** New standalone
+    scripts that add no logic, read-only queries, test additions, doc edits, type
+    annotations.
+  - **Tier 2 — propose first, wait for confirmation.** Anything touching
+    `packages/db/models.py`, `listeners.py`, `gate.py`, `tiering.py`, `Strategy`
+    thresholds, migrations, or any write to `data/casefile.db`.
+  - If unsure which tier, it's Tier 2.
 - Tell me where a spec is **underspecified** rather than filling the gap silently.
 - **Flag problems instead of working around them.**
 - **Test claims empirically rather than reasoning about them.** This has caught several real
@@ -74,7 +80,7 @@ senior-developer commit style with a banned-word list.
 - Media: Azure Neural TTS, faster-whisper forced alignment, ffmpeg render with libass subtitle
   burn-in
 - LLM: Gemini free tier behind a provider interface
-- Tests: **322 passing**, mypy strict clean, ruff clean
+- Tests: **324 passing**, mypy strict clean, ruff clean
 
 **Gemini free tier is 20 requests/day/project.** Two calls per source (claims + entities), so ten
 sources a day, shared with every dry-run and prompt experiment. This is a real constraint on every
@@ -110,14 +116,19 @@ against real sources.
 
 Channels exist as schema only, no OAuth.
 
+**Script generation** — `packages/script/chronological.py` exists and is seam-tested (an
+in-memory scratch DB, `NarratableSourcingError` confirmed firing on a deliberately
+Tier-B-sourced claim), but it is a deliberately dumb plumbing proof, not the generator
+`docs/ARCHITECTURES.md` v2 specifies. It takes `subject_id` + a raw claim-id list rather
+than `episode_id`, ignores its own `architecture` parameter entirely, has no six-section
+structure or thesis-bearing mechanism, and does not refuse below the 40-claim minimum.
+
 **Roughly 28% of the full vision.**
 
 ---
 
 ## 6. What is not built
 
-- **Script generation** — `packages/script/` does not exist. This is the next piece, the missing
-  link between the finished data layer and the working media pipeline.
 - Shot sequencing, image sourcing, `image_rights` ever leaving NONE
 - Thumbnails, music
 - `packages/publish/` — no OAuth, no upload adapters, nothing publishes
@@ -216,6 +227,20 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
     a slideshow is YouTube's bucket 1.
 25. Claim extraction reaches procedural content reliably, contested content unreliably.
 26. Vertical formats need separate renders, not crops.
+27. **Claim extraction has no dedup and no idempotency.** `subject_id=8` holds 45 claims from one
+    source (stacked `--force` reruns) representing roughly 8 distinct facts. Beyond the review
+    cost: an inflated claim pool inflates the claim-subset dimension of the uniqueness guarantee
+    without adding real variation.
+28. **`POST /subjects/{id}/sources` accepts caller-supplied `tier`, `text_sha256`, and `word_count`
+    with no fetch, no robots.txt check, no Tier C check, no dedup, no boilerplate check.** A caller
+    can assert `PRIMARY_RECORD` on content nobody retrieved and satisfy R1 condition 2 for a source
+    nobody read. Currently only exercised by tests.
+
+### Script generation
+
+29. **`generate_script`'s `architecture` parameter is accepted and never read.** The same
+    `claim_ids` produce byte-identical output under any architecture value. Same failure as #17,
+    one layer down — at the artifact rather than at `EpisodeClaim`.
 
 ---
 
@@ -293,15 +318,27 @@ endpoint by design — weakening R1 is meant to require a reviewed code change, 
 
 ## 10. Next steps, in order
 
-1. **Build a clean Lizzie Borden subject.** Three CONTEMPORANEOUS sources across three distinct
-   domains — the gate accepts that now. `crimearchives.net` already works, so two more are needed.
-   1893 trial coverage is abundant, digitized, and public domain. Fetching is free.
-2. **Claim extraction** on those sources (~3 Gemini calls).
-3. **Flip `narratable`** on the good claims. This is an editorial act and nothing in the project has
-   ever done it outside seed data. Do it carefully the first time.
-4. **Script generation**, against `chronological` and `record_forward` only — that is what the data
-   actually supports. `docs/ARCHITECTURES.md` exists as a DRAFT spec for four architectures and is
-   expected to be rewritten by hand.
+**The three-domain Borden plan below is dead.** Eight archives were checked — cdnc.ucr.edu,
+virginiachronicle.com, nyshistoricnewspapers.org, lizzie-borden.com, digitalcommonwealth.org,
+newspaperarchive.com, genealogybank.com, archive.org — and exactly one, `crimearchives.net`, turned
+out usable. The rest were robots.txt disallow-all (most state newspaper-archive platforms run an
+identical Veridian-based blocklist) or a Cloudflare JS challenge, same shape as finding #23.
+`subject_id=8`'s single CONTEMPORANEOUS source stands as-is; finding a second and third domain is
+not the next step anymore.
+
+`docs/ARCHITECTURES.md` (v2, authoritative) is the spec the generator is built against. New next
+steps, in order:
+
+1. **`EpisodeClaim.thesis_bearing`.** The column ARCHITECTURES.md §4 names as the thesis
+   mechanism's schema requirement — a migration following
+   `scripts/migrate_entity_living.py`'s safety posture (this project has no Alembic; migrations are
+   one-off scripts against `data/casefile.db` directly).
+2. **The real generator**, against ARCHITECTURES.md v2's `chronological` spec: `episode_id` in, not
+   `subject_id` plus a raw claim-id list — thesis, architecture, and thesis-bearing flags read from
+   `Episode`/`EpisodeClaim`, not passed by hand. `packages/script/chronological.py` proved the
+   plumbing; it is not this generator — see finding #29 and §6.
+3. **A rendered episode.** First real end-to-end output, against whichever subject actually clears
+   R1's gate by then.
 
 Why Borden and not Hinterkaifeck: Hinterkaifeck's Tier A material is 1922 German police and inquest
 paperwork, almost certainly not on the open web. All four fetched sources are non-Tier-A. It also
@@ -336,6 +373,7 @@ revenue, no framing rescues this."*
   and most important.
 - `docs/SOURCING.md` — stage 1 spec, claim table, source tiers, the variation manifest
 - `docs/POLICY.md` — monetization constraints, 12 derived requirements
-- `docs/ARCHITECTURES.md` — DRAFT, unreviewed, expected to be rewritten
+- `docs/ARCHITECTURES.md` — v2, authoritative. The generator is built against this, superseding
+  `docs/SCHEMA.md`'s older architecture-space findings' framing of it as an unreviewed DRAFT.
 - `experiments/slice_01/FINDINGS.md` — render timings, resolution finding
 - `CLAUDE.md` — working conventions
