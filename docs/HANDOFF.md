@@ -244,9 +244,11 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
 
 ### Script generation
 
-29. **`generate_script`'s `architecture` parameter is accepted and never read.** The same
-    `claim_ids` produce byte-identical output under any architecture value. Same failure as #17,
-    one layer down — at the artifact rather than at `EpisodeClaim`.
+29. **`generate_script` reads `Episode.architecture` only for the render gate's null-check.**
+    Nothing branches on its value, so `CHRONOLOGICAL` and any other enum member still produce
+    identical output. Same failure as #17, one layer down — at the artifact rather than at
+    `EpisodeClaim`. Closes when step 2 (the six-section structure) lands — that's the first code
+    that will actually differ by architecture.
 
 ---
 
