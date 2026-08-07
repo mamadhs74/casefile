@@ -445,6 +445,11 @@ class EpisodeClaim(TimestampedModel, table=True):
     A row referencing a Claim whose narratable is not True is rejected at
     insert -- see packages/db/listeners.py. narratable is meaningless if it
     can be bypassed one hop downstream at episode assembly.
+
+    thesis_bearing -- docs/ARCHITECTURES.md sec 4's thesis mechanism.
+    A deliberate human write, the same shape as Claim.narratable: never
+    inferred by a model. Default False, added by
+    scripts/migrate_episode_claim_thesis_bearing.py.
     """
 
     __tablename__ = "episode_claim"
@@ -453,6 +458,7 @@ class EpisodeClaim(TimestampedModel, table=True):
     episode_id: int = Field(foreign_key="episode.id", index=True)
     claim_id: int = Field(foreign_key="claim.id", index=True)
     position: int
+    thesis_bearing: bool = Field(default=False)
 
 
 class Script(TimestampedModel, table=True):
