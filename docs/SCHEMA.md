@@ -1881,17 +1881,77 @@ column, not trivial to populate, since `claim_extraction.py` has no capability t
 single source's text when something was discovered, and all 79 existing claims would sit
 `NULL` until re-extracted).
 
-### The effective architecture space is 3, not 6
+### Finding: `context_first` has no material — a source-content gap, not a schema gap
+
+Checked directly against subject 8's full 79-claim table: `category = LOCATION` and
+`category = TIMELINE` together are 14 claims, real volume on paper. Content is a
+different story. **All 14 are case-event claims wearing a setting label — zero are
+period or setting claims.** The 2 `LOCATION` claims are one fact stated twice ("The
+Hinterkaifeck farm was located approximately 43 miles north of Munich" /
+"...situated approximately 43 miles north of Munich," a force-re-extraction duplicate,
+not two independent facts). Every one of the 12 `TIMELINE` claims is a case date — when
+the maid arrived, when the bodies were found, how long a jury deliberated, when a modern
+appellate opinion was filed — not a fact about the place or period the case happened in.
+
+**This is not a schema gap and not a missing pipeline stage — it's a source-content
+gap.** Nothing about `Claim.category` or extraction's validation is broken; the category
+labels are arguably correct (a case-event date genuinely is a `TIMELINE` claim). The gap
+is that the source material itself doesn't contain period/setting content: true-crime
+retrospectives — every source fetched for this investigation, across two subjects — are
+written to answer "what happened," not "what the place and period were like." **Recorded
+as a hypothesis, explicitly untested:** a source chosen specifically for period or social
+history content (not a case retrospective) might produce genuine setting claims. No
+source of that kind has been fetched or tested against this pipeline. Not fixed here.
+
+### The effective architecture space is 2, not 6
 
 `misconception` and `open_question` need cross-source reconciliation that doesn't exist.
 `investigation_led` needs an ordering axis the schema doesn't capture, and today produces
-nothing generation-time-distinguishable from `chronological`. **Buildable today:
-`chronological`, `record_forward`, `context_first`.** Stated plainly because it's load-
-bearing for the uniqueness guarantee above: "Cross-user uniqueness" specifies the
-combinatorial guarantee as **thesis × architecture × ordered claim subset** — and the
-architecture dimension of that product is currently half its documented size, three
-usable values against six named ones, before any thesis-quality or claim-selection
-question is even asked.
+nothing generation-time-distinguishable from `chronological`. `context_first` needs
+period/setting material that current source selection doesn't produce, per the finding
+directly above. **Buildable today: `chronological` and `record_forward`.** Stated plainly
+because it's load-bearing for the uniqueness guarantee above: "Cross-user uniqueness"
+specifies the combinatorial guarantee as **thesis × architecture × ordered claim
+subset** — and the architecture dimension of that product is currently one-third its
+documented size, two usable values against six named ones, before any thesis-quality or
+claim-selection question is even asked.
+
+### Finding: `record_forward` checked against `subject_9` (Hinterkaifeck) specifically —
+not buildable, and not only for the reason asked about
+
+The question was whether Hinterkaifeck has one document-dense enough source. It doesn't:
+17 claims across four articles (subject 8's `source_6`), no single source close to
+`source_7`'s 45. But checking `subject_9` (the actual clean Hinterkaifeck subject) directly
+surfaces a harder blocker than density. **All four of `subject_9`'s fetched sources are
+non-Tier-A** — `source_8` (mentalfloss) `UNVERIFIED`, `source_9` (Wikipedia) `REFERENCE`,
+`source_10` (vocal.media) `UNVERIFIED`, `source_11` (hitched2homicide) `UNVERIFIED`. Zero
+`PRIMARY_RECORD`, zero `CONTEMPORANEOUS`. `subject_9` currently holds **zero `Claim`
+rows** — claim extraction has never been run against any of its four sources.
+
+Two independent blockers, not one, and neither is `record_forward`-specific:
+
+1. **R1's own gate fails.** `strategy_id=1`'s thresholds are `min_verified_sources=3`,
+   `min_primary_records=1`, `min_distinct_domains=3`. `subject_9` has one non-`UNVERIFIED`
+   source (the Wikipedia `REFERENCE`) against a floor of three, and zero
+   `PRIMARY_RECORD` sources against a floor of one. `check_source_gate()` would reject
+   this subject before script generation could begin, for any architecture.
+2. **Even if R1 passed, no claim from any of these four sources could ever be
+   `narratable`.** The invariant requires every source backing a narratable claim to be
+   Tier A; none of the four are. This isn't unique to `record_forward` — `EpisodeClaim`
+   rejects any non-narratable claim at insert, for every architecture equally. A claim
+   extracted from any of `subject_9`'s current sources, however well-written, could never
+   be selected into an episode at all.
+
+**Stated as plainly as asked: `record_forward` is not buildable for Hinterkaifeck today —
+but neither is `chronological`, nor any other architecture, because `subject_9` cannot
+currently produce a single narratable claim.** This isn't a new problem; it's the same
+one this document's Source section already named for this exact case —
+*"For the actual subject this run targeted — a 1922 Bavarian farmstead murder — Tier A
+means the original German-language police and inquest records. Those are very unlikely
+to be sitting on the open web at a fetchable URL at all"* — now confirmed concretely
+against the specific sources this investigation actually fetched, not argued abstractly.
+The architecture dimension isn't 1 for Hinterkaifeck. It's 0, until a Tier A source is
+found for it or the subject is dropped in favor of one that has one.
 
 ---
 
