@@ -453,3 +453,136 @@ async def test_forced_reextraction_adds_a_second_batch_without_touching_the_firs
     all_entities = session.exec(select(Entity)).all()
     assert len(all_entities) == 2
     assert session.get(Entity, first_entity_id) is not None  # untouched, not deleted
+
+
+async def test_match_or_new_path_end_to_end_with_mixed_batch(
+    session: Session, strategy_id: int, tmp_path: Path
+) -> None:
+    """The whole match-or-new path, real stub, no Gemini call: a subject
+    with two pre-existing entities (each with a founding EntityMatch) sees
+    a second source proposing a six-candidate mixed batch -- one valid
+    match against each of the five failure/success shapes the model's
+    match-or-new decision can take, plus a sixth candidate duplicating
+    the first's match later in the same batch. Confirms the paths don't
+    corrupt each other: a rejection earlier in the loop doesn't affect
+    later candidates, and the known-entity context that actually reaches
+    the provider is the real thing, not just something persistence
+    happens to agree with afterward. This complements, not replaces, the
+    narrower single-behavior tests above."""
+    subject_id = _persist_subject(session, strategy_id)
+    founding_source = _make_source(session, subject_id, tmp_path, title="founding")
+
+    entity1 = make_entity(subject_id, name="Andreas Gruber", role=EntityRole.VICTIM)
+    entity2 = make_entity(subject_id, name="Cäzilia Gruber", role=EntityRole.VICTIM)
+    session.add(entity1)
+    session.add(entity2)
+    session.commit()
+    session.refresh(entity1)
+    session.refresh(entity2)
+    entity1_id = _id(entity1)
+    entity2_id = _id(entity2)
+    session.add(make_entity_match(entity1_id, _id(founding_source), identifying_span="Andreas"))
+    session.add(make_entity_match(entity2_id, _id(founding_source), identifying_span="Cäzilia"))
+    session.commit()
+
+    new_source_text = (
+        "Andreas Gruber, his wife Cäzilia Gruber, and their daughter Viktoria Gabriel "
+        "lived on the farm. A neighbor named Lorenz Schlittenbauer visited the "
+        "property. Investigator Konrad Müller led the inquiry."
+    )
+    text_path = tmp_path / "second_source.txt"
+    text_path.write_text(new_source_text, encoding="utf-8")
+    new_source = _make_source(
+        session, subject_id, tmp_path, title="new", text_path=str(text_path)
+    )
+
+    candidates = [
+        ProposedEntity(  # matches entity1, with rationale -- should succeed
+            name="Andreas Gruber",
+            role="victim",
+            identifying_span="Andreas Gruber",
+            matched_entity_id=entity1_id,
+            match_rationale="Same name and role as the known victim.",
+        ),
+        ProposedEntity(  # matches entity2, no rationale -- missing_match_rationale
+            name="Cäzilia Gruber",
+            role="victim",
+            identifying_span="Cäzilia Gruber",
+            matched_entity_id=entity2_id,
+            match_rationale=None,
+        ),
+        ProposedEntity(  # new person -- should succeed as a new Entity
+            name="Viktoria Gabriel",
+            role="victim",
+            identifying_span="Viktoria Gabriel",
+            matched_entity_id=None,
+            match_rationale=None,
+        ),
+        ProposedEntity(  # new person but with a rationale -- unexpected_match_rationale
+            name="Lorenz Schlittenbauer",
+            role="witness",
+            identifying_span="Lorenz Schlittenbauer",
+            matched_entity_id=None,
+            match_rationale="not needed for a new entity",
+        ),
+        ProposedEntity(  # id never sent to the provider -- invalid_matched_entity_id
+            name="Konrad Müller",
+            role="investigator",
+            identifying_span="Konrad Müller",
+            matched_entity_id=999999,
+            match_rationale="a guess at an id that doesn't exist",
+        ),
+        ProposedEntity(  # duplicates the first candidate's match, later in
+            # the batch -- duplicate_match_in_batch, guards the
+            # UniqueConstraint(entity_id, source_id) from raising
+            # IntegrityError mid-batch
+            name="Andreas Gruber",
+            role="victim",
+            identifying_span="Andreas Gruber",
+            matched_entity_id=entity1_id,
+            match_rationale="Second mention, same person.",
+        ),
+    ]
+    provider = _FakeProvider(candidates)
+
+    result = await extract_entities_for_source(session, new_source, provider)
+
+    # The known-entity context that actually reached the provider is the
+    # real thing -- not just something persistence happens to agree with.
+    assert provider.last_known_entities is not None
+    assert {ke.entity_id for ke in provider.last_known_entities} == {entity1_id, entity2_id}
+
+    assert len(result.entities) == 2
+    assert len(result.rejected) == 4
+    assert {r.reason for r in result.rejected} == {
+        "missing_match_rationale",
+        "unexpected_match_rationale",
+        "invalid_matched_entity_id",
+        "duplicate_match_in_batch",
+    }
+
+    # No phantom Entity for any of the four rejected candidates -- only
+    # the two pre-existing entities plus the one genuinely new one.
+    all_entities = session.exec(select(Entity)).all()
+    assert len(all_entities) == 3
+
+    andreas_matches = session.exec(
+        select(EntityMatch).where(EntityMatch.entity_id == entity1_id)
+    ).all()
+    assert len(andreas_matches) == 2  # founding + the one successful new match
+    new_match = next(m for m in andreas_matches if m.source_id == new_source.id)
+    assert new_match.match_rationale == "Same name and role as the known victim."
+
+    # The missing-rationale rejection didn't sneak a second match in.
+    cazilia_matches = session.exec(
+        select(EntityMatch).where(EntityMatch.entity_id == entity2_id)
+    ).all()
+    assert len(cazilia_matches) == 1  # founding only
+
+    viktoria = next(e for e in result.entities if e.name == "Viktoria Gabriel")
+    assert viktoria.is_new is True
+    assert viktoria.matched_entity_id is None
+    persisted_viktoria_match = session.exec(
+        select(EntityMatch).where(EntityMatch.entity_id == viktoria.entity_id)
+    ).one()
+    assert persisted_viktoria_match.match_rationale is None
