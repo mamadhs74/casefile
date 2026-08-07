@@ -100,6 +100,15 @@ def _set_cold_open(session: Session, episode_id: int, claim_id: int) -> None:
     session.commit()
 
 
+def _statement(session: Session, claim_id: int) -> str:
+    """tests/factories.py::make_claim gives each claim a distinct
+    statement now, not a shared constant -- this fetches the real one so
+    tests can assert identity and order, not just occurrence counts."""
+    claim = session.get(Claim, claim_id)
+    assert claim is not None
+    return claim.statement
+
+
 # ---------------------------------------------------------------------------
 # Success path
 # ---------------------------------------------------------------------------
@@ -107,7 +116,9 @@ def _set_cold_open(session: Session, episode_id: int, claim_id: int) -> None:
 
 def test_generate_script_success_path(session: Session, strategy_id: int) -> None:
     """5 claims, all thesis-bearing: one GROUND, one RESOLUTION, three
-    untagged (Sequence). Cold open is one of the untagged three."""
+    untagged (Sequence). Cold open is one of the untagged three. Distinct
+    per-claim statements let this check identity and order, not just how
+    many times some shared text occurs."""
     episode_id, claim_ids = _build_episode_with_claims(
         session,
         strategy_id,
@@ -121,31 +132,34 @@ def test_generate_script_success_path(session: Session, strategy_id: int) -> Non
             ("1893-06-09", True, None),
         ],
     )
-    _set_cold_open(session, episode_id, claim_ids[2])
+    ground_id, resolution_id, seq_a_id, seq_b_id, seq_c_id = claim_ids
+    _set_cold_open(session, episode_id, seq_a_id)
 
     script = generate_script(session, episode_id, min_claim_count=5)
 
-    assert script.ground == "A test claim."
-    assert script.resolution == "A test claim."
-    assert script.cold_open == "A test claim."
+    assert script.ground == _statement(session, ground_id)
+    assert script.resolution == _statement(session, resolution_id)
+    assert script.cold_open == _statement(session, seq_a_id)
     assert script.thesis == "The investigation moved faster than the record admits."
     assert script.return_ == script.thesis
     assert script.untagged_claim_count == 3
 
-    # Sequence holds the three untagged claims (including the cold-open
-    # one), sorted by date_anchor.
-    assert script.sequence.count("A test claim.") == 3
+    # The cold-open claim (1893-06-05) also appears in Sequence, in
+    # date_anchor order alongside the other two untagged claims
+    # (1893-06-09, then 1893-06-15) -- not just present, in the right
+    # place.
+    assert script.sequence.split("\n") == [
+        _statement(session, seq_a_id),
+        _statement(session, seq_c_id),
+        _statement(session, seq_b_id),
+    ]
 
     # Rule 4's report exists and is derived from narration_wpm (145
     # default), not a hardcoded 150 -- exact values aren't asserted here,
-    # just that a real, positive budget was computed.
+    # just that a real, positive budget was computed and the actual count
+    # matches the real Ground text, not a guessed word count.
     assert script.budgeted_word_counts.sequence > 0
-    assert script.actual_word_counts.ground == 3  # "A test claim." = 3 words
-
-    # cold_open + ground + resolution + 3 sequence (the cold-open claim
-    # appears in both cold_open and sequence, by design -- rule 2).
-    assert script.text.count("A test claim.") == 6
-    assert "The investigation moved faster" in script.text
+    assert script.actual_word_counts.ground == len(script.ground.split())
 
 
 def test_generate_script_ground_is_empty_when_no_claims_tagged_ground(
@@ -202,10 +216,11 @@ def test_generate_script_cold_open_claim_excluded_from_its_own_section_tag(
     script = generate_script(session, episode_id, min_claim_count=5)
 
     assert script.ground == ""
-    assert script.cold_open == "A test claim."
-    # The 4 untagged claims plus the GROUND-tagged cold-open claim,
-    # diverted into Sequence instead of Ground.
-    assert script.sequence.count("A test claim.") == 5
+    assert script.cold_open == _statement(session, ground_tagged_claim_id)
+    # The GROUND-tagged cold-open claim (1893-06-01) is diverted into
+    # Sequence instead of Ground, first by date_anchor, ahead of the 4
+    # untagged claims -- exact order, not just presence.
+    assert script.sequence.split("\n") == [_statement(session, cid) for cid in claim_ids]
 
 
 # ---------------------------------------------------------------------------

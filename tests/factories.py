@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
+from itertools import count
 from typing import Any
 
 from packages.db.models import (
@@ -108,12 +109,19 @@ def make_source(subject_id: int, **overrides: Any) -> Source:
     return Source(**defaults)
 
 
+_claim_statement_counter = count(1)
+
+
 def make_claim(subject_id: int, **overrides: Any) -> Claim:
     # narratable defaults False -- packages/db/listeners.py rejects True at
     # creation unconditionally, see NarratableSourcingError.
+    # statement defaults to a distinct string per call, not a shared
+    # constant -- a test asserting which claim landed in which section,
+    # or that Sequence is in date_anchor order, can't tell claims apart
+    # by content if every one reads "A test claim."
     defaults: dict[str, Any] = dict(
         subject_id=subject_id,
-        statement="A test claim.",
+        statement=f"Test claim {next(_claim_statement_counter)}.",
         category=ClaimCategory.EVENT,
         claim_type=ClaimType.FACT,
         confidence=ClaimConfidence.ESTABLISHED,
