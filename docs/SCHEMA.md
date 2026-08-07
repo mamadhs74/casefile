@@ -1188,6 +1188,17 @@ run against a real Gemini response is exactly the point a human should look at o
 before it touches more than one row. Supports `--dry-run` (runs every validation step,
 persists nothing) and `--force`.
 
+**Claim extraction has no dedup and no idempotency, and the consequence reaches past
+the reviewer-reconciliation cost already described above.** `subject_id=8` holds 45
+claims from `source_7` — stacked `--force` reruns, same failure mode as `source_id=5`'s
+4 batches above — representing roughly 8 distinct facts, several restated with wording
+variants at least 6 times each. Beyond the review burden: an inflated claim pool
+inflates the claim-subset dimension of the uniqueness guarantee (thesis × architecture ×
+claim subset, see the `Episode` section below) without adding any real variation — six
+near-identical restatements of "the jury deliberated for an hour and a half" give
+`generate_script` six claim_ids to choose among, not six distinct facts, so a subset
+drawn from this pool looks combinatorially richer than it is. Not fixed.
+
 ---
 
 ## Entity, ClaimEntity, EntityMatch
