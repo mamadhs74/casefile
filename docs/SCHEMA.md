@@ -1981,6 +1981,20 @@ untagged ordering mechanism — which is `docs/POLICY.md`'s Bucket 1 failure
 one layer up from where it was already flagged for `generation_fingerprint` above.** Not
 fixed here.
 
+**The same failure recurs one layer down, at the generated artifact rather than at
+`EpisodeClaim`.** `packages/script/chronological.py::generate_script(session,
+subject_id, architecture, claim_ids)` takes `architecture: Literal["chronological"]` as a
+parameter and never reads it — confirmed directly from the function body, not inferred:
+the only things done with `claim_ids` are the per-claim fetch/validate loop and a
+`sorted()` call keyed on `date_anchor` and `id`, neither of which touches `architecture`
+at all. Two calls with the same `claim_ids` and different `architecture` values produce
+byte-identical output today, because there is no branch anywhere for `architecture` to
+select. Same shape as finding #17 above, one layer further down: that finding showed two
+episodes can carry indistinguishable `EpisodeClaim` rows under different architecture
+labels; this shows the generator that turns claims into prose wouldn't do anything
+different with an architecture tag even if `EpisodeClaim` recorded one correctly. Not
+fixed here.
+
 ### Finding: `record_forward`'s minimum-claims-per-source threshold is a selection-time
 check, not a schema gap — and that's a different kind of missing than `investigation_led`'s
 
