@@ -416,7 +416,70 @@ revenue, no framing rescues this."*
 
 ---
 
-## 11. Open questions to decide, not to code
+## 11. Decisions and why
+
+Things the repo records but doesn't explain — the reasoning behind choices that show up as
+code shape, not comments.
+
+**Thesis-bearing is hand-flagged, never model-inferred.** `EpisodeClaim.thesis_bearing` is
+set at episode creation, by a person, from a fixed claim pool. The alternative — a model
+reading the claim pool and inferring which claims carry the thesis — was rejected because it
+converges: the same pool, scored for emphasis by the same model, tends toward the same
+claims every time. That's `POLICY.md` bucket 1's failure (interchangeable output) arriving
+through the data layer instead of the prose layer. Raising temperature on that inference call
+wouldn't fix it either — see §2, "the same episode with different words is the same failure."
+A human choosing which claims matter is a real different-episodes mechanism; a model scoring
+salience against a fixed pool is not.
+
+**`Claim.section` lives on `Claim`, not `EpisodeClaim`, and `thesis_bearing` lives on
+`EpisodeClaim`, not `Claim` — this split is intentional, not incidental.** `section` answers
+*where* a claim goes structurally (Ground, Sequence, Resolution), which is a property of the
+claim itself, true across every episode that uses it. `thesis_bearing` answers *how much
+weight* a claim gets in one specific episode's argument, which depends on that episode's
+thesis, not on the claim. The two questions are orthogonal by construction: a Ground claim
+can be thesis-bearing and get elaborated inside Ground (decided earlier, see
+`chronological.py`). Putting `section` on `Claim` means it's set once and amortizes across
+every episode that reuses the claim; putting `thesis_bearing` there instead would force it to
+mean the same thing in every episode, which contradicts the entire reason thesis exists as a
+per-episode field.
+
+**20 minutes is derived, not arbitrary.** Below it, the composed word target per section falls
+under natural claim length — a section can't be given fewer words than it takes to state its
+claims plainly, so shortening the episode stops changing the prose and just starts truncating
+it. The 60/40 emphasis split in Sequence (§3.4) also stops distinguishing anything once the
+whole section's budget is small enough that there's no room left to weight thesis-bearing
+claims over the rest. 20 minutes is the floor where both of those still function. **40 claims
+(`MIN_TOTAL_CLAIM_COUNT`) is still a placeholder** — nothing has derived it the way 20 minutes
+was derived; `docs/ARCHITECTURES.md` §2 has the drift-risk note on why it's likely wrong under
+today's per-section composition mechanism.
+
+**Composition is per-section, not per-claim.** One call per claim (Sequence's thesis-bearing
+claims plus the rest, plus Return) runs to roughly 36 calls for a single episode — almost
+double the entire 20/day free-tier quota before Ground or Resolution need anything. One call
+per section is 2–5 calls per episode (§5, §10). This isn't a quality tradeoff being made for
+cost reasons; per-claim composition is not affordable at all on the free tier, so per-section
+is the only version of step 3 that can run.
+
+**Strategy 1 (true crime/horror) was built first, and it's the hardest of the three.** Its
+sources are disproportionately bot-walled or paywalled (finding #23), and `CHILD_VICTIM`
+makes a large share of famous cases ad-ineligible outright (§10's note on why Borden, not
+Hinterkaifeck, and §12's open question on how far that rule generalizes). Nothing in
+`packages/` is strategy-specific — the schema, the gates, and the generator all work off
+`Strategy` rows and `Subject`/`Claim`/`Episode`, not off any true-crime-only assumption.
+Strategies 2 (celebrity news) and 3 (film/TV news and trivia) have current, multi-domain,
+robots-friendly sources — building strategy 1 first means the hardest sourcing problem was
+solved (or found unsolvable, per finding #23) before the other two ever need to prove the
+pipeline is actually strategy-agnostic.
+
+**The real blocker on a watchable episode is claim-to-image mapping, not script quality.**
+Steps 1–3 (§5) are real, tested work, but the seam test (§5) is the evidence for this
+decision: it proved the render path works end to end, and in the same run proved the imagery
+has no relationship to the narration, because no claim-to-image mapping exists anywhere yet.
+Script composition improving further doesn't move that number. `packages/visual/` is next
+because it's the thing actually standing between the current state and a video anyone would
+watch, not because script work is finished.
+
+## 12. Open questions to decide, not to code
 
 - **With the architecture dimension at 2, thesis and claim subset carry nearly all the uniqueness
   burden. Thesis is human-authored and unvalidated. That means I am the variation mechanism right
@@ -436,7 +499,7 @@ revenue, no framing rescues this."*
 
 ---
 
-## 12. Read these first
+## 13. Read these first
 
 - `docs/SCHEMA.md` — every design decision, investigation, rejected alternative and why. Longest
   and most important.
