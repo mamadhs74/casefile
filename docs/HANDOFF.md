@@ -80,7 +80,7 @@ senior-developer commit style with a banned-word list.
 - Media: Azure Neural TTS, faster-whisper forced alignment, ffmpeg render with libass subtitle
   burn-in
 - LLM: Gemini free tier behind a provider interface
-- Tests: **346 passing**, mypy strict clean, ruff clean
+- Tests: **355 passing**, mypy strict clean, ruff clean
 
 **Gemini free tier is 20 requests/day/project.** Two calls per source (claims + entities), so ten
 sources a day, shared with every dry-run and prompt experiment. This is a real constraint on every
@@ -103,7 +103,8 @@ h264/AAC). Confirmed the seam works; confirmed nothing else does yet — no clai
 mapping exists (the render used the unrelated Hinterkaifeck stand-in photos, since no other
 images exist anywhere), no music, no thumbnail. One tracked fixture
 (`experiments/slice_01/work/subs.ass`) was overwritten mid-test and restored via `git
-checkout` immediately after; everything else touched is gitignored.
+checkout` immediately after; everything else touched is gitignored. In short: the render
+path works end to end; the imagery has no relationship to the narration.
 
 **Stage 1 data layer**, both halves:
 
@@ -147,7 +148,27 @@ target, so raising on it would make this function permanently unable to succeed 
 step 3's composition exists. Return emits `Episode.thesis` verbatim as a visible
 placeholder, since real paraphrase needs that same composition.
 
-Content is still concatenation, not composition, everywhere. That's step 3.
+**Step 3 (composition) is now built.** `composition_provider.py` defines the
+`CompositionProvider` Protocol (`ClaimForComposition`, `ComposedSection`,
+`CompositionProviderError`/`TruncatedCompositionError`); `gemini_composition_provider.py`
+implements it against the real Gemini API but **has never been executed** — see §7 finding
+#30. `composition.py` is the architecture-agnostic orchestration layer
+(`compose_section_text`); rule 4 stays checked-and-reported, not enforced, no automatic
+retry. `chronological_composition.py`'s `compose_episode(session, episode_id, provider)` is
+the async entry point wiring composition into the `chronological` generator.
+
+Wiring is option B: `generate_script` stays synchronous and behaviorally unchanged — every
+one of its checks still runs, and runs first, before any provider call. `SectionedScript`
+gained additive per-section claim lists (`cold_open_claim`, `ground_claims`,
+`sequence_claims`, `resolution_claims`, all `ClaimForComposition` rather than raw `Claim`,
+since `thesis_bearing` lives on `EpisodeClaim` not `Claim`) so `compose_episode` reads the
+allocation `generate_script` already did instead of redoing it. Call count is 2–4 per
+episode: Sequence and Return always (Sequence can never be empty — the cold-open claim is
+always appended to it; Return's paraphrase task needs a call even with no claims), Ground
+and Resolution only when `generate_script` put a claim in them.
+
+All of this is tested against a local fake provider only. Zero real Gemini calls spent
+building it.
 
 **Roughly 28% of the full vision.**
 
@@ -274,6 +295,12 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
     this logic — an episode tagged `INVESTIGATION_LED` would still get the chronological
     six-section treatment, since the render gate only checks non-null. Dispatch-by-value belongs
     one layer up (whatever calls this module for a given episode), not inside it.
+30. **`gemini_composition_provider.py` has never been executed.** It implements
+    `CompositionProvider` against the real Gemini API; step 3's prompt (rule 1 — never
+    introduce a fact absent from the claim set; preserve `claim_type`/`confidence`
+    distinctions in the language; Sequence's 60/40 word split per `docs/ARCHITECTURES.md`
+    §3.4) has only ever run against the local fake provider in tests. Untested against a
+    real model. First real call is next — see §10.
 
 ---
 
@@ -361,26 +388,26 @@ not the next step anymore.
 
 `docs/ARCHITECTURES.md` (v2, authoritative) is the spec the generator is built against.
 
-**Steps 1 and 2 are both done:** `EpisodeClaim.thesis_bearing`, `Claim.section`,
-`Episode.cold_open_claim_id` (migrations + model fields), and `generate_script(session,
+**Steps 1, 2, and 3 are all done:** `EpisodeClaim.thesis_bearing`, `Claim.section`,
+`Episode.cold_open_claim_id` (migrations + model fields); `generate_script(session,
 episode_id, ...)` returning `SectionedScript` — the render gate, rules 6 and 7, the
-narratable re-check, section allocation, and all four cold-open validations, all tested,
-346 passing. See §5. Content is still concatenation everywhere, not composition. New
-next steps, in order:
+narratable re-check, section allocation, all four cold-open validations; and
+`compose_episode(session, episode_id, provider)` — the async entry point wiring per-section
+composition calls onto that allocation, 2–4 per episode. All tested, 355 passing. See §5.
 
-1. **Step 3: the LLM pass.** Composing a claim to a word target (rule 4's "satisfy" half,
-   not just its "check" half, which step 2 already reports) is the one place flat
-   concatenation genuinely can't reach, and the same gap blocks Return's real paraphrase
-   — this is where a model call finally becomes necessary. **Granularity is decided:
-   per-section, not per-claim.** One call per claim (Sequence's 8 thesis-bearing + ~27
-   others, plus Return) is ~36 calls for a single episode — almost double the entire
-   daily quota, before Ground or Resolution need anything. One call per section
-   (Sequence, Ground, Resolution, Return; Cold Open and Thesis need no composition call
-   at all) is **4–5 Gemini calls per episode**, comfortably inside 20/day, with headroom
-   for a retry when a section misses its word budget.
-2. **A rendered episode.** First real end-to-end output, against whichever subject actually
-   clears R1's gate by then. The render path itself is no longer the unknown — see §5's
-   seam-test entry — what's missing now is claim-to-image mapping, not the render.
+Step 3 has never run against real Gemini — everything above is tested against a local fake
+provider only (§5, §7 finding #30). New next steps, in order:
+
+1. **Run `compose_episode` against real Gemini, once.** This costs quota — 2–4 calls, for
+   whichever subject actually clears R1's gate by then — and is the first real test of
+   `gemini_composition_provider.py`'s prompt. Decide before spending it: which subject,
+   which episode, and what "good enough" composed prose looks like, since nothing has
+   checked the prompt's rule 1 (never introduce a fact absent from the claim set) or its
+   `claim_type`/`confidence` discipline against a real model yet.
+2. **Claim-to-image mapping (`packages/visual/`).** This, not script quality, is the real
+   blocker on a watchable episode. The seam test already proved the render path works; it
+   also proved the imagery has no relationship to the narration, since no claim-to-image
+   mapping exists anywhere yet — see §5.
 
 Why Borden and not Hinterkaifeck: Hinterkaifeck's Tier A material is 1922 German police and inquest
 paperwork, almost certainly not on the open web. All four fetched sources are non-Tier-A. It also
