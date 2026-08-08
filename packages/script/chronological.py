@@ -42,6 +42,8 @@ from sqlmodel import Session, select
 
 from packages.db.models import Claim, Episode, EpisodeClaim, VariationProfile
 from packages.domain.enums import Section
+from packages.script.composition import word_count
+from packages.script.composition_provider import ClaimForComposition
 
 MIN_THESIS_BEARING_CLAIMS = 5
 MAX_THESIS_BEARING_CLAIMS = 10
@@ -94,7 +96,20 @@ class SectionedScript:
     (rule 4) and how many of the episode's claims were untagged (neither
     GROUND nor RESOLUTION, i.e. Sequence by default -- see Claim.section's
     own docstring for why that's not necessarily the same as "reviewed
-    and confirmed Sequence")."""
+    and confirmed Sequence").
+
+    cold_open_claim/ground_claims/sequence_claims/resolution_claims --
+    additive, added for step 3's composition pass
+    (packages/script/chronological_composition.py). Text fields above
+    already existed and are computed the same way they always were
+    (concatenation); these expose the *allocation* generate_script did to
+    produce that text, as ClaimForComposition rather than raw Claim ORM
+    objects specifically because thesis_bearing lives on EpisodeClaim,
+    not Claim -- these have to be built while both rows are still in
+    scope, which is only true inside generate_script's own allocation
+    loop. Nothing about the existing text/word-count/untagged fields
+    changes, and nothing here is a second implementation of allocation --
+    it is the one implementation, exposed."""
 
     cold_open: str
     thesis: str
@@ -105,6 +120,10 @@ class SectionedScript:
     actual_word_counts: SectionWordCounts
     budgeted_word_counts: SectionWordCounts
     untagged_claim_count: int
+    cold_open_claim: ClaimForComposition
+    ground_claims: list[ClaimForComposition]
+    sequence_claims: list[ClaimForComposition]
+    resolution_claims: list[ClaimForComposition]
 
     @property
     def text(self) -> str:
@@ -319,34 +338,35 @@ def generate_script(
     # of its own Claim.section tag -- see module docstring -- and appended
     # to sequence_claims below instead, so it lands in exactly Cold Open
     # and Sequence (rule 2), never also in Ground or Resolution.
-    ground_claims: list[Claim] = []
-    resolution_claims: list[Claim] = []
-    sequence_claims: list[Claim] = []
+    ground_claims: list[ClaimForComposition] = []
+    resolution_claims: list[ClaimForComposition] = []
+    sequence_claims: list[ClaimForComposition] = []
     untagged_claim_count = 0
 
-    for _, claim in rows:
+    for episode_claim, claim in rows:
         if claim.section is None:
             untagged_claim_count += 1
         if claim.id == cold_open_claim.id:
             continue
+        composable = _to_claim_for_composition(claim, episode_claim)
         if claim.section == Section.GROUND:
-            ground_claims.append(claim)
+            ground_claims.append(composable)
         elif claim.section == Section.RESOLUTION:
-            resolution_claims.append(claim)
+            resolution_claims.append(composable)
         else:
-            sequence_claims.append(claim)
+            sequence_claims.append(composable)
 
-    sequence_claims.append(cold_open_claim)
+    cold_open_composable = _to_claim_for_composition(cold_open_claim, cold_open_episode_claim)
+    sequence_claims.append(cold_open_composable)
 
-    def _sort_key(claim: Claim) -> tuple[bool, str, int]:
-        assert claim.id is not None
-        return (claim.date_anchor is None, claim.date_anchor or "", claim.id)
+    def _sort_key(c: ClaimForComposition) -> tuple[bool, str, int]:
+        return (c.date_anchor is None, c.date_anchor or "", c.claim_id)
 
     ground_claims.sort(key=_sort_key)
     resolution_claims.sort(key=_sort_key)
     sequence_claims.sort(key=_sort_key)
 
-    cold_open_text = _as_sentence(cold_open_claim.statement)
+    cold_open_text = _as_sentence(cold_open_composable.statement)
     ground_text = "\n".join(_as_sentence(c.statement) for c in ground_claims)
     sequence_text = "\n".join(_as_sentence(c.statement) for c in sequence_claims)
     resolution_text = "\n".join(_as_sentence(c.statement) for c in resolution_claims)
@@ -362,12 +382,12 @@ def generate_script(
         return_=round(total_words * RETURN_SHARE),
     )
     actual_word_counts = SectionWordCounts(
-        cold_open=_word_count(cold_open_text),
-        thesis=_word_count(thesis),
-        ground=_word_count(ground_text),
-        sequence=_word_count(sequence_text),
-        resolution=_word_count(resolution_text),
-        return_=_word_count(return_text),
+        cold_open=word_count(cold_open_text),
+        thesis=word_count(thesis),
+        ground=word_count(ground_text),
+        sequence=word_count(sequence_text),
+        resolution=word_count(resolution_text),
+        return_=word_count(return_text),
     )
 
     return SectionedScript(
@@ -380,6 +400,10 @@ def generate_script(
         actual_word_counts=actual_word_counts,
         budgeted_word_counts=budgeted_word_counts,
         untagged_claim_count=untagged_claim_count,
+        cold_open_claim=cold_open_composable,
+        ground_claims=ground_claims,
+        sequence_claims=sequence_claims,
+        resolution_claims=resolution_claims,
     )
 
 
@@ -390,5 +414,13 @@ def _as_sentence(statement: str) -> str:
     return text
 
 
-def _word_count(text: str) -> int:
-    return len(text.split())
+def _to_claim_for_composition(claim: Claim, episode_claim: EpisodeClaim) -> ClaimForComposition:
+    assert claim.id is not None
+    return ClaimForComposition(
+        claim_id=claim.id,
+        statement=claim.statement,
+        claim_type=claim.claim_type.value,
+        confidence=claim.confidence.value,
+        date_anchor=claim.date_anchor,
+        thesis_bearing=episode_claim.thesis_bearing,
+    )

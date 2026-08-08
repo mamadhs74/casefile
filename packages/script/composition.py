@@ -52,10 +52,15 @@ async def compose_section_text(
     composed = await provider.compose_section(claims, thesis, word_budget)
     return ComposedSectionResult(
         text=composed.text,
-        actual_word_count=_word_count(composed.text),
+        actual_word_count=word_count(composed.text),
         budgeted_word_count=word_budget,
     )
 
 
-def _word_count(text: str) -> int:
+def word_count(text: str) -> int:
+    """The one home for this -- packages/script/chronological.py had its
+    own private copy before this module existed; that one is now removed
+    and imports this instead. Public (no leading underscore) specifically
+    because it's imported across a module boundary now, not just used
+    internally."""
     return len(text.split())
