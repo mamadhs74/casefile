@@ -326,6 +326,32 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
     condition. Worth a run that varies claim count under the ordering constraint before
     concluding which one is the real cause.
 
+### Sourcing gate, measured
+
+32. **R1's gate is measured, not estimated, and strategy 1's only sourced subject fails
+    it.** `check_source_gate()` (`packages/research/gate.py`) requires, live DB values for
+    `strategy_id=1` (`criminal-cases`): `min_verified_sources=3`, `min_primary_records=1`,
+    `min_distinct_domains=3`. Subject 8 scores **1/1/1** — one verified source, one Tier A
+    source, one domain — and fails conditions 1 and 3 (`INSUFFICIENT_VERIFIED_SOURCES`,
+    `INSUFFICIENT_DISTINCT_DOMAINS`); only condition 2 passes. **Claim count plays no role
+    in the gate at all** — it counts `Source` rows exclusively, so a subject with 45 claims
+    from that one source scores no better than a subject with one claim from it. A clean
+    extraction of Borden into its own subject would score identically: sources 5 and 6 (the
+    contaminating Antonio Long and Hinterkaifeck sources sharing subject 8) are `UNVERIFIED`
+    tier and never count toward any of the three conditions, in either subject.
+    **Consequence: strategy 1 currently has no subject that can produce an episode.**
+    Thirteen archives were checked looking for a second independent Borden domain
+    (`docs/SCHEMA.md`'s Cloudflare/403 findings plus the eight-archive batch in §10) and all
+    thirteen were blocked; only `crimearchives.net` ever worked. **This is a sourcing
+    failure, not a claim-quality or tooling failure** — the 45 Borden claims are eligible to
+    be narratable right now (single Tier A source each, the sourcing guard would pass) and
+    the flag was simply never set on any of them, which is a separate, trivially-fixable
+    editorial gap, not what's actually blocking an episode. Strategies 2 and 3 (§11's own
+    note that strategy 1 was built first specifically because it's the hardest of the three)
+    have current, multi-domain, robots-friendly sources and are expected to clear these same
+    thresholds routinely — given this measured result, that is now **the reason to build
+    them next, not a stated preference**.
+
 ---
 
 ## 8. Entity extraction: validated
@@ -559,6 +585,11 @@ watch, not because script work is finished.
 - Is investigation_led worth a schema addition (a discovery-order field on `ClaimSource`), or is it
   worth dropping? The column is trivial; populating it is not — extraction has no capability to ask
   a source when investigators learned something.
+- **Strategy 1 has zero subjects that clear R1 right now** (finding #32, §7) — Borden's own
+  measured 1/1/1 against a 3/1/3 gate, after thirteen archives failed to produce a second
+  domain. Keep spending sourcing effort on strategy 1, or build strategy 2 or 3 next, where
+  the same gate is expected to clear routinely? This is a scheduling decision this document
+  can surface but not make.
 
 ---
 
