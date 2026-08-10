@@ -295,12 +295,36 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
     this logic — an episode tagged `INVESTIGATION_LED` would still get the chronological
     six-section treatment, since the render gate only checks non-null. Dispatch-by-value belongs
     one layer up (whatever calls this module for a given episode), not inside it.
-30. **`gemini_composition_provider.py` has never been executed.** It implements
-    `CompositionProvider` against the real Gemini API; step 3's prompt (rule 1 — never
-    introduce a fact absent from the claim set; preserve `claim_type`/`confidence`
-    distinctions in the language; Sequence's 60/40 word split per `docs/ARCHITECTURES.md`
-    §3.4) has only ever run against the local fake provider in tests. Untested against a
-    real model. First real call is next — see §10.
+30. **Closed.** `gemini_composition_provider.py` has now run against the real Gemini API
+    three times (one 5-claim fixture, two 40-claim fixtures), not just the local fake
+    provider. Rule 1 (never introduce a fact absent from the claim set) and the
+    `claim_type`/`confidence` attribution discipline both held up across all three runs —
+    contemporaneous/reported claims consistently got attribution language, contested
+    claims consistently got hedged without picking a side. What did *not* hold up, and is
+    the reason this closes with corrections attached rather than cleanly: the prompt's
+    original word_target guidance produced repetition, not elaboration, on the first
+    scale run (a thesis-bearing claim restated 2-3 times in different words) — fixed by
+    forbidding restatement explicitly and giving each claim its own numeric word_target
+    instead of a bare section-level total. See `docs/ARCHITECTURES.md` §2/§3.4 and this
+    document's own §11 for what closing this finding actually changed: the 20-minute
+    target is withdrawn, and `thesis_bearing` turned out to govern claim inclusion, not
+    composed word count.
+31. **Chronological ordering and claim absorption are structurally in tension.** The
+    anti-repetition fix's intended alternative to restating a claim was absorption —
+    a large-word_target claim "drawing in" neighboring claims, subordinating them into
+    one developed passage instead of each getting its own separate sentence. Measured
+    directly: it worked in Ground (5 claims) — the model merged two pairs of claims into
+    shared sentences via clauses like "...where Alden Reyes had worked..." It did not
+    happen at all in Sequence (30 claims, real content) — every claim landed as its own
+    plain sentence regardless of word_target, thesis-bearing or not (the 1.07× finding,
+    #30 above). Sequence's own rule 5 (`docs/ARCHITECTURES.md` §4) requires strict
+    `date_anchor` order with no exceptions — genuine absorption usually means writing
+    about a later or earlier claim's detail inside an earlier or later claim's sentence,
+    which reorders which claim's *content* appears where even if claim *order* is
+    preserved in a technical sense. Untested whether this is a claim-count effect (5 vs
+    30), an ordering-constraint effect, or both — only one data point exists for each
+    condition. Worth a run that varies claim count under the ordering constraint before
+    concluding which one is the real cause.
 
 ---
 
@@ -443,15 +467,54 @@ every episode that reuses the claim; putting `thesis_bearing` there instead woul
 mean the same thing in every episode, which contradicts the entire reason thesis exists as a
 per-episode field.
 
-**20 minutes is derived, not arbitrary.** Below it, the composed word target per section falls
-under natural claim length — a section can't be given fewer words than it takes to state its
-claims plainly, so shortening the episode stops changing the prose and just starts truncating
-it. The 60/40 emphasis split in Sequence (§3.4) also stops distinguishing anything once the
-whole section's budget is small enough that there's no room left to weight thesis-bearing
-claims over the rest. 20 minutes is the floor where both of those still function. **40 claims
-(`MIN_TOTAL_CLAIM_COUNT`) is still a placeholder** — nothing has derived it the way 20 minutes
-was derived; `docs/ARCHITECTURES.md` §2 has the drift-risk note on why it's likely wrong under
-today's per-section composition mechanism.
+**20 minutes is withdrawn — the runtime target that replaced it, and why, is `docs/ARCHITECTURES.md`
+§2, not repeated here.** The short version: it assumed thesis-bearing claims could be elaborated
+to ~145 words each, and three real runs against real Gemini never produced that at any target
+tried — a 628-word/claim target landed at ~26 actual, a 188-word target landed at 60.3 actual
+(and only by restating the claim two or three times, which rule 1 forbids), and a 71-word target
+landed at 16.0 actual once restatement was closed off. Word budget is now claims × `WORDS_PER_CLAIM`
+(`packages/script/chronological.py`) instead of minutes × `narration_wpm`; runtime is now a report
+(`SectionedScript.derived_runtime_minutes`) computed from the word count, not an input that
+produces it.
+
+**`WORDS_PER_CLAIM` is 18, not 28 — 28 was this project's own mistake, caught one session later.**
+The session that introduced `WORDS_PER_CLAIM` set it to 28 and described that as "the top of the
+measured range," but the range it cited in the same breath was 15.0–18.4 (non-elaborated) and
+16.0–21.0 (thesis-bearing) — 28 was above both, an assertion, not a measurement. Corrected to 18,
+the actual top of the non-elaborated range, which is the relevant one now that the 60/40 split
+(below) no longer distinguishes thesis-bearing claims from anything. **This will need to rise, and
+be re-measured rather than re-guessed, the day a prose pass adds connective tissue between
+claims** — both measured runs wrote one plain sentence per claim, nothing more. `MIN_TOTAL_CLAIM_COUNT`
+(40) is known to produce a ~4.5–5.0-minute episode at this rate (40 × 18 ÷ 145–160 wpm), not the
+~7.5 minutes the 28-word version of this number implied; an 8-minute episode needs ~65 claims, a
+10-minute episode ~80 (`1,160 ÷ 18` and `1,450 ÷ 18` at 145 wpm). The 45-claim Borden pool — the
+only real Tier A claim data this project has — produces 45 × 18 = 810 words, **~5.6 minutes**, the
+one figure here computed against real sourced claims rather than a synthetic fixture. None of these
+are code changes; what changed is that the floor's implication is now legible, which makes it a
+sourcing target, not just a gate check. See `docs/ARCHITECTURES.md` §2's own "drift risk, resolved"
+note — the claim-count floor used to live in three places that could disagree with each other; now
+there's one source of truth (`WORDS_PER_CLAIM`) and the rest cite it.
+
+**`thesis_bearing` governs claim selection, not word allocation — and §3.4's 60/40 split is now
+removed, not just demoted.** The three real runs that killed the 20-minute target also measured
+whether the split produces the differentiation §1 originally described — a thesis-bearing claim's
+composed passage noticeably longer than a non-thesis-bearing one's — and it mostly doesn't: 3.28×
+in the one run that showed a real gap, and that gap was built by restating the claim, not
+developing it (rule 1 violation, since fixed); 1.07× and 1.27× in the two measurements taken after
+restatement was forbidden — essentially flat. That alone argued for demoting the split to "minor
+nudge." Correcting `WORDS_PER_CLAIM` from 28 to 18 in the same pass argued for removing it outright:
+at 18, 60/40 on a real Sequence section (6 thesis-bearing among 30, the real fixture's shape) gives
+the 24 non-thesis-bearing claims ~8 words each — below the length of the claim statement itself.
+The split only ever looked harmless because it was dividing an inflated total; at an honest rate
+there's no room left in it that doesn't truncate someone below their own source material.
+`_apply_word_targets` now gives every claim in a section the same `word_target`
+(`round(section_budget / len(claims))`), no branching on `thesis_bearing` at all — the field is
+still sent to the model per claim (for tone) and rule 6 still requires 5–10 thesis-bearing claims
+per episode, but neither of those touches word count anymore. The uniqueness mechanism that
+actually varies episode to episode is which claims get marked thesis-bearing at all — a real,
+human, per-episode selection act that changes what's *in* the pool. It was never really about how
+many words the prose spends on each one once it's in. See `docs/ARCHITECTURES.md` §3.4 for the
+full measured table and the arithmetic showing why no split survives at the corrected rate.
 
 **Composition is per-section, not per-claim.** One call per claim (Sequence's thesis-bearing
 claims plus the rest, plus Return) runs to roughly 36 calls for a single episode — almost

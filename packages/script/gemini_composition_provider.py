@@ -6,10 +6,12 @@ packages.script.composition_provider.CompositionProvider that exists
 today; see that module's docstring for why nothing else in
 packages/script/ imports this file directly.
 
-Not called anywhere yet -- packages/script/composition.py is the
-orchestration layer that will call it, and nothing wires that into
-generate_script yet either. This file is built and lint/type-checked, not
-exercised against a real API key.
+First run against a real key (docs/HANDOFF.md sec 7 finding #30) showed
+the section-level word_budget alone isn't enough: nothing told the model
+how many claims were sharing that budget or how unevenly to split it, so
+every section landed far under target. ClaimForComposition.word_target
+(computed in packages/script/chronological.py) is the fix -- see this
+module's own "Word allocation" instruction below.
 """
 
 from __future__ import annotations
@@ -45,10 +47,11 @@ You will receive:
 - A list of claims. Each has: a statement, a claim_type ("fact",
   "contemporaneous_report", or "inference"), a confidence
   ("established", "reported", or "contested"), a date_anchor (may be
-  absent), and thesis_bearing (true or false).
+  absent), thesis_bearing (true or false), and a word_target -- the
+  number of words to spend on that specific claim.
 - The episode's thesis -- the argument this episode is making. Not a
   claim to restate; context for tone and emphasis.
-- A target word count for this section.
+- A target word count for this section as a whole.
 
 Two rules that override everything else:
 
@@ -78,23 +81,35 @@ Two rules that override everything else:
    rest of this pipeline exists to preserve.
 
 Word allocation within the section:
-- Claims with thesis_bearing=true: elaborate. Several sentences each,
-  with whatever concrete detail that claim's own statement already
-  contains -- the number, the name, the physical specifics. These are
-  the claims the thesis turns on; give them room.
-- Claims with thesis_bearing=false: one sentence each. State it and move
-  on. Do not elaborate, do not add setup or transition sentences around
-  it.
-- Aim for the target word count. It is a target, not a hard limit --
-  do not pad with filler to reach it, and do not truncate a
-  thesis-bearing claim's detail just to stay under it.
+- A claim's word_target is earned by developing it against the other
+  claims in the section, not by restating it. A claim with a large
+  word_target should draw in the claims around it -- connect them to
+  it, subordinate them to it, make them part of its account -- so those
+  claims are covered inside that passage rather than written out again
+  as separate sentences of their own later. A claim with a small
+  word_target (roughly one sentence's worth) should be stated once,
+  plainly, and left alone.
+- Never state the same fact twice in different words, for any claim, at
+  any word_target. If a claim cannot reach its word_target without
+  repeating something already said, write it once and stop -- under-
+  running a target is correct, restating a fact to pad toward it is
+  not.
+- The section-level target word count is the sum these per-claim
+  targets should land near once you add them all up. If the two ever
+  seem in tension, follow each claim's own word_target and the no-
+  repetition rule above -- never restate a claim just to move the
+  section's total closer to its target.
 
 If the claims list is empty, this is the Return section, a different
 task: paraphrase the given thesis in your own words, in the narrator's
-voice, acknowledging that the events have now been laid out -- do not
-restate the thesis verbatim, do not introduce any claim or fact not
+voice, restating what the composed sections already established -- do
+not restate the thesis verbatim, do not introduce any claim or fact not
 already stated elsewhere, no moral, no address to the viewer ("you might
-be wondering...").
+be wondering..."). Restate what was shown; do not make the case for it.
+You may not characterize any line of evidence as insufficient,
+inconclusive, or secondary, and you may not argue for why the thesis is
+correct -- if no claim you were given says a piece of evidence failed to
+settle something, you may not say it either.
 
 Order claims within the section in the order given -- do not reorder
 them. Output plain prose only: no headings, no claim IDs, no markdown,
@@ -193,7 +208,8 @@ def _build_claims_block(claims: list[ClaimForComposition]) -> str:
         date_part = f", date_anchor={c.date_anchor}" if c.date_anchor else ""
         lines.append(
             f'- claim_type={c.claim_type}, confidence={c.confidence}, '
-            f'thesis_bearing={c.thesis_bearing}{date_part}: "{c.statement}"'
+            f'thesis_bearing={c.thesis_bearing}, word_target={c.word_target}'
+            f'{date_part}: "{c.statement}"'
         )
     return "\n".join(lines)
 

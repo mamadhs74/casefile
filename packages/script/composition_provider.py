@@ -40,7 +40,19 @@ class ClaimForComposition:
     This is deliberately not scoped to Sequence specifically -- a Ground
     or Resolution claim can be thesis-bearing too and gets the same
     elaboration inside its own section, per how thesis_bearing and
-    section were decided to be orthogonal (docs/SCHEMA.md)."""
+    section were decided to be orthogonal (docs/SCHEMA.md).
+
+    word_target is the number this split actually cashes out to: sec
+    3.4's 60/40 section-budget split, divided evenly within each of the
+    two groups, computed by packages/script/chronological.py alongside
+    SectionWordCounts (it needs the section's own claim list and that
+    section's own budget, both only in scope there). Before this field
+    existed, the provider only ever received thesis_bearing as a bare
+    boolean plus one section-level total -- nothing told it how many
+    claims were sharing that total or how unevenly to split it, which is
+    why the first real run under-filled every section. See
+    gemini_composition_provider.py's system instruction for how this
+    number is used in the actual request."""
 
     claim_id: int
     statement: str
@@ -48,6 +60,7 @@ class ClaimForComposition:
     confidence: str
     date_anchor: str | None
     thesis_bearing: bool
+    word_target: int
 
 
 @dataclass(frozen=True)

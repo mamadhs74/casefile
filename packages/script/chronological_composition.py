@@ -32,6 +32,7 @@ from dataclasses import replace
 from sqlmodel import Session
 
 from packages.script.chronological import (
+    EPISODE_TARGET_MINUTES,
     MIN_TOTAL_CLAIM_COUNT,
     SectionedScript,
     SectionWordCounts,
@@ -47,15 +48,22 @@ async def compose_episode(
     provider: CompositionProvider,
     *,
     min_claim_count: int = MIN_TOTAL_CLAIM_COUNT,
+    episode_target_minutes: int = EPISODE_TARGET_MINUTES,
 ) -> SectionedScript:
     """Runs generate_script first, synchronously -- every one of its
     checks (episode exists, render gate, profile exists, narratable,
     rules 6/7, cold open) must already pass before any provider call
     happens. This function adds no validation of its own; a
     generate_script failure propagates unchanged, before any quota is
-    spent.
+    spent. episode_target_minutes is passed straight through -- see
+    generate_script's own docstring for why it's injectable.
     """
-    allocated = generate_script(session, episode_id, min_claim_count=min_claim_count)
+    allocated = generate_script(
+        session,
+        episode_id,
+        min_claim_count=min_claim_count,
+        episode_target_minutes=episode_target_minutes,
+    )
 
     sequence_result = await compose_section_text(
         provider,

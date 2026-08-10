@@ -1,8 +1,26 @@
 # ARCHITECTURES.md
 
-**Status: v2.** Specifies `chronological` only. `record_forward` is unwritten.
+**Status: v4.** Specifies `chronological` only. `record_forward` is unwritten.
 `investigation_led`, `context_first`, `misconception` and `open_question` are not
 buildable against the current data layer — see `docs/SCHEMA.md` findings #16–#18.
+
+Changes from v3 (this revision): `WORDS_PER_CLAIM` corrected from 28 to 18 — 28
+was asserted, not measured, against the real per-claim data v3 itself cited;
+18 is the top of the actually-measured non-elaborated range (15.0–18.4 words
+across two real runs). §3.4's 60/40 split is **removed**, not demoted further
+— at the corrected, lower per-claim rate, 60/40 would give Sequence's
+non-thesis-bearing claims ~8 words each, below the length of the claim
+statement itself, so there was no honest split left to demote. `word_target`
+is now uniform per claim within a section. Every number in §2 that depends on
+the rate (runtime for 40 claims, claim counts for 8/10-minute episodes, the
+Borden pool's implied runtime) is recomputed against 18, not 28. See §2 and
+§3.4.
+
+Changes from v2: word budget derives from claim count (`WORDS_PER_CLAIM`), not
+a target runtime — three real Gemini runs showed the runtime-derived budget
+assumed an elaboration rate that was never achievable; `MIN_TOTAL_CLAIM_COUNT`
+is reframed as a sourcing target with a known runtime rather than an undecided
+placeholder.
 
 Changes from v1: word budget derives from `VariationProfile.narration_wpm` rather
 than a hardcoded rate; cold open composes with `ColdOpenStyle`'s four variants
@@ -16,78 +34,129 @@ Events in the order they happened, with the thesis stated early and earned by th
 end.
 
 What makes an episode non-interchangeable is **not** the ordering. Date order is
-the same for everyone. It is that the thesis decides **what gets time**. Two
-episodes drawn from the same claim pool differ because one spends four minutes on
-the dress and thirty seconds on the verdict, and the other does the reverse.
+the same for everyone. It is that the thesis decides **what claims are even in
+the pool** — which claims a human marked thesis-bearing, which is what actually
+varies episode to episode. It is **not**, as this section originally claimed,
+that composed word count differs claim to claim within a section: §3.4 records
+three real runs against real Gemini that measured this directly, and it doesn't
+happen — a thesis-bearing claim's composed passage is not reliably longer than a
+non-thesis-bearing one's. "One spends four minutes on the dress and thirty
+seconds on the verdict" was the intended mechanism, not an observed one.
 
-That mechanism is §4. Without it, thesis is decorative and this architecture
-produces one episode per claim pool.
+That mechanism — thesis-bearing status changing which claims are selected into
+an episode's pool at all — is §4. Without it, thesis is decorative and this
+architecture produces one episode per claim pool.
 
 ---
 
 ## 2. Time and word budget
 
-**Target: 20 minutes — derived from the thesis mechanism's own floor, not arbitrary.**
-Checked against real claim data: at 8 minutes, Sequence's non-thesis-bearing composed
-target falls to ~11 words/claim, below the observed natural claim length (15.67 words
-average, the 45-claim Borden pool — the only real Tier-A claim data this project has).
-Below that floor, composing a claim stops being expansion and becomes compression, and
-§3.4's 60/40 emphasis split stops distinguishing thesis-bearing claims from anything,
-because there's no room left between "elaborated" and "stated and moved past." 20
-minutes is roughly the shortest runtime at which that split still has room to work.
-**Recheck this if observed claim length changes materially** — it rests on one pool of
-real data from one case, not a general fact about narration.
+**Withdrawn: the 20-minute target.** It was derived from an elaboration rate —
+8 thesis-bearing claims composed to ~145 words each (§3.4, as originally
+written) — and three real runs against real Gemini
+(`gemini_composition_provider.py`, `docs/HANDOFF.md` §11) never produced
+anything close to that, at any word_target tried: 628 words/claim (a 5-claim
+fixture, every claim thesis-bearing) landed at ~26 actual; 188 words/claim (a
+40-claim fixture) landed at 60.3 actual, and only by restating the claim two or
+three times over in different words, which is exactly what rule 1 (never
+introduce a fact absent from the claims) forbids; once restatement was
+explicitly forbidden in the prompt, a 71-word target for the same shape of
+claim landed at 16.0 actual. **A target derived from an elaboration rate that
+was never achievable was never going to produce a 20-minute episode, or any
+particular runtime — it produced whatever composing each claim once, plainly,
+actually took.** See §3.4 for what those three runs mean for the thesis
+mechanism itself, not just the runtime number.
 
-Word count is **derived, not fixed**:
+**Word count is now derived from claim count, not target runtime:**
 
 ```
-total_words = 20 * VariationProfile.narration_wpm
+WORDS_PER_CLAIM = 18
+total_words = len(episode_claims) * WORDS_PER_CLAIM
 ```
 
-At 145 wpm that is 2,900 words; at 160, 3,200. Section budgets are percentages of
-whatever that total comes to.
+**28 was this project's own mistake, corrected here, not a starting point.**
+The previous revision of this document set `WORDS_PER_CLAIM` to 28 and
+described it as calibrated to "the upper end" of measured claim length — but
+the actual measured range it cited alongside that number was 15.0–18.4 words
+(composed, non-elaborated claims, two real runs) and 16.0–21.0 (thesis-bearing,
+same runs) — 28 was above *both* ranges, not the top of either. It was an
+assertion dressed as a measurement. **18 is the top of the non-elaborated
+range, not above it** — 15.0–18.4 measured, 18 chosen. The non-elaborated
+range is the relevant one now that §3.4's split is removed and every claim
+gets the same treatment (see below), not just the "rest" group.
 
-| # | Section | Share | Time @20min |
-|---|---|---|---|
-| 1 | Cold open | 4% | 0:45 |
-| 2 | Thesis | 2.5% | 0:30 |
-| 3 | Ground | 10% | 2:00 |
-| 4 | Sequence | 65% | 13:00 |
-| 5 | Resolution | 14% | 2:45 |
-| 6 | Return | 4.5% | 1:00 |
+**This number will rise, and should be re-measured, not re-guessed, when it
+does.** Both real runs this range is drawn from wrote each claim as its own
+plain sentence — no connective tissue between claims, no transitions, because
+nothing in the prompt asked for any. A later prose pass that adds transitions
+or genuinely combines adjacent claims into one sentence will use more words
+per claim than 18. When that pass exists, measure its actual output the same
+way this number was measured (real Gemini runs, real word counts, not a guess
+at what a plausible connective-tissue rate might be) rather than bump this
+constant on reasoning alone.
+
+Section budgets are still percentages of whatever the total comes to — the
+percentages themselves are unchanged, only what "the total" is derived from:
+
+| # | Section | Share |
+|---|---|---|
+| 1 | Cold open | 4% |
+| 2 | Thesis | 2.5% |
+| 3 | Ground | 10% |
+| 4 | Sequence | 65% |
+| 5 | Resolution | 14% |
+| 6 | Return | 4.5% |
 
 Sequence at 65% is a deliberate claim: this architecture is mostly the events.
 
-**Minimum claim count: not one fixed number — it depends on which mechanism is
-generating the words, and today's two honest readings don't agree with each other or
-with the "40" previously written here.**
+**Runtime is now a report, not an input.** `SectionedScript.derived_runtime_minutes`
+is `total_words / VariationProfile.narration_wpm`, computed after the word
+count, not the other way around — rule 4 reports the length an episode will
+actually run, instead of checking words against a target nothing was ever
+going to hit. `episode_target_minutes` survives as an injectable parameter on
+`generate_script`/`compose_episode` (same shape as `min_claim_count`) but no
+longer feeds the budget; nothing enforces the runtime it used to imply.
 
-- **Under today's actual mechanism (flat concatenation, no composition):** a 20-minute
-  episode at real observed claim length (15.67–18.41 words/claim, depending on pool)
-  needs roughly **140–190 distinct claims** to actually fill 20 minutes —
-  `claim-derived words (89% of total) ÷ average claim length`. Below that, the episode
-  is shorter than 20 minutes regardless of what the floor says; the floor checks a
-  count, it doesn't create length.
-- **Under §3.4's composed-word rule** (8 thesis-bearing claims at ~145 words each, the
-  rest at ~25–30 words each — a target that only means anything once real composition,
-  step 3, exists): Sequence alone needs roughly **35 claims**, close to the 40 written
-  here before, before Ground or Resolution need any claims of their own.
+**`MIN_TOTAL_CLAIM_COUNT` (40, unchanged this session) is no longer a
+placeholder — it's a known, and shorter-than-previously-thought, runtime.**
+40 claims × 18 words = 720 words. At `narration_wpm` 145–160 (the range this
+project has used), that's 720 ÷ 160 = 4.5 to 720 ÷ 145 = 5.0 minutes — **call
+it ~4.5–5.0, not the ~7.5 minutes the previous (28-word) revision of this
+document computed, and nowhere near the 20 minutes originally envisioned.**
+Reaching longer runtimes at 145 wpm needs, by the same arithmetic
+(`runtime_minutes * narration_wpm / WORDS_PER_CLAIM`):
 
-Neither of these is 40. **This is a step-3-dependent number, not a fixed one** — the
-concatenation-era floor and the composition-era floor are different claim counts, and
-writing one bare "40" here conflated them. `MIN_TOTAL_CLAIM_COUNT` in
-`packages/script/chronological.py` is unchanged pending a decision between these two
-readings — this is a documentation correction only.
+| Target runtime | Claims needed (145 wpm) |
+|---|---|
+| ~4.5–5.0 min | 40 (`MIN_TOTAL_CLAIM_COUNT`, unchanged) |
+| 8 min | 1,160 ÷ 18 = 64.4 → **~65** |
+| 10 min | 1,450 ÷ 18 = 80.6 → **~80** |
 
-**Drift risk, same shape as the R1 gate's condition-2 drift (`docs/SCHEMA.md`):** the
-claim-count floor currently lives in three places that can silently disagree —
-this section, rule 7 (`§4`), and `MIN_TOTAL_CLAIM_COUNT` in code — with nothing tying
-them together. The single source of truth should be the code constant. This section
-and rule 7 should cite `MIN_TOTAL_CLAIM_COUNT` by name rather than restate its literal
-value, the same way `packages/research/extraction.py`'s own floor is referred to by
-name (`MIN_EXTRACTED_WORD_COUNT`) elsewhere in this project rather than copied as a
-bare number wherever it matters. Not applied here — this paragraph names the fix, it
-doesn't make it.
+**The existing 45-claim Borden pool (`docs/SCHEMA.md`, the only real Tier A
+claim data this project has) produces 45 × 18 = 810 words, ~5.6 minutes at 145
+wpm** — the one number in this section computed against real sourced claims
+rather than a synthetic fixture, and it lands close to the 40-claim floor's
+own ~5-minute implication, not near 8 or 10 minutes.
+
+None of this is a code change — `MIN_TOTAL_CLAIM_COUNT` is still 40 — what
+changed is that this number is now legible as a **sourcing target**, not an
+abstract gate check: a subject that clears R1 with 40 claims produces a
+~5-minute episode; a subject that needs an 8-minute episode needs sourcing to
+reach ~65 narratable claims, a 10-minute episode ~80, not just clear R1's
+independent-sources-and-tier thresholds. Whether 40, ~65, ~80, or some other
+number is the right floor to actually gate on is a product decision this
+paragraph doesn't make — it only makes the implication of whichever number is
+chosen visible.
+
+**Drift risk, resolved, not just noted.** The claim-count floor used to live in
+three places that could silently disagree — this section, rule 7 (§4), and
+`MIN_TOTAL_CLAIM_COUNT` in code — with nothing tying them together, and this
+section used to carry two competing, unresolved readings of what the right
+number even was. Both are gone: `WORDS_PER_CLAIM` in
+`packages/script/chronological.py` is the one place the words-per-claim rate
+lives, this section and rule 7 describe what it implies rather than
+maintaining a second copy of a number, and there is exactly one reading of the
+budget math now, not two.
 
 ---
 
@@ -158,16 +227,55 @@ Schema: `EpisodeClaim.thesis_bearing: bool`, default `False`.
 work to distinguish the episode. Above 10 everything is emphasised, which is the
 same as nothing being emphasised.
 
-Word allocation inside Sequence:
+**Word allocation inside Sequence is uniform — the 60/40 split is removed, not
+demoted.** As originally written, this section specified:
 
-- Thesis-bearing claims: **60%**, divided among them. At 8 claims that is ~145
-  words each — several sentences, with the detail, the number, the name, the
-  physical specifics.
-- All other claims: **40%**, divided among them. One sentence each, ~25–30 words.
-  Stated and moved past.
+- Thesis-bearing claims: ~~60%, divided among them.~~
+- All other claims: ~~40%, divided among them.~~
+
+`_apply_word_targets` (`packages/script/chronological.py`) now gives every
+claim in a section the same `word_target`: `round(section_budget /
+len(claims))`, no branching on `thesis_bearing` at all. Three real runs
+against real Gemini are why this was removed, not just demoted:
+
+| Run | Thesis-bearing target | Actual (avg) | Ratio vs. rest |
+|---|---|---|---|
+| 40-claim, 60/40, no repetition guard | 188 words | 60.3 words | **3.28×** — but by restating the claim 2-3 times in different words, which rule 1 forbids |
+| 40-claim, 45/55, repetition forbidden | 71 words | 16.0 words | **1.07×** — essentially flat |
+| Same run, Resolution section | 91 words | 21.0 words | **1.27×** — essentially flat |
+
+The only run that showed real differentiation did it through restating a
+claim, not developing it — the thing rule 1 exists to prevent. Once that was
+closed off, differentiation collapsed to near-1×. That alone was reason to
+stop calling the split a mechanism. What made it worth *removing* rather than
+leaving in place as an ineffective-but-harmless nudge: `WORDS_PER_CLAIM` was
+also corrected downward in the same pass, from an asserted 28 to a measured
+18 (§2). At 18, a 60/40 split on a real Sequence section (e.g. 6
+thesis-bearing claims among 30, the real 40-claim fixture's shape) gives the
+24 non-thesis-bearing claims ~8 words each — below the length of the claim
+statement itself (the shortest claim in that fixture is 7 words; most run
+15–27). A split that used to look merely ineffective at an inflated total
+becomes actively harmful at an honest one: it would truncate most of a
+section's claims below their own source material. There is no smaller,
+gentler split left to keep — uniform allocation is what's left once the
+inflated total that made 60/40 look harmless is gone.
+
+**`thesis_bearing` governs claim selection, not word allocation, full stop.**
+Whether a claim is thesis-bearing still decides whether it's one of the 5–10
+claims that get an episode built around them at all (§4 rule 6) — that
+inclusion decision is what varies episode to episode and is what actually
+produces the "one episode per claim pool" failure §1 describes if it's
+missing. `thesis_bearing` is still sent to the model in the claims block
+(`gemini_composition_provider.py`) for tone — a thesis-bearing claim may still
+read with more weight in how it's phrased — but it has no effect on
+`word_target` anymore. `word_target` itself is kept, not deleted: every claim
+still gets one, uniform within its section, and it still grounds sentence
+length against something rather than nothing.
 
 The generator receives the thesis text and the flags. It does not decide which
-claims matter; it decides only how to write the ones it was told matter.
+claims matter; it decides only how to write the ones it was told matter — and
+"how to write" no longer varies by how much a claim matters, only "which
+claims matter" does.
 
 ### 5. Resolution
 What the record settles, and what it doesn't. Verdict, outcome, aftermath.

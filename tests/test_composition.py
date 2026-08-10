@@ -48,6 +48,7 @@ def _claim(**overrides: object) -> ClaimForComposition:
         confidence="established",
         date_anchor="1893-06-20",
         thesis_bearing=True,
+        word_target=50,
     )
     defaults.update(overrides)
     return ClaimForComposition(**defaults)  # type: ignore[arg-type]
