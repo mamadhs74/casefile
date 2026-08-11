@@ -35,6 +35,10 @@ package = false
 pythonpath = ["."]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-m 'not slow'"
+markers = [
+    "slow: shells out to ffmpeg; excluded from the default run, opt in with -m slow",
+]
 
 [tool.ruff]
 line-length = 100
