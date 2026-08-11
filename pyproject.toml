@@ -17,6 +17,7 @@ dependencies = [
     "trafilatura>=1.12",
     "pypdf>=5.0",
     "google-genai>=2.16.0",
+    "pillow>=12.3.0",
 ]
 
 [dependency-groups]
