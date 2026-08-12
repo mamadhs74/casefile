@@ -1,17 +1,28 @@
 """First end-to-end packages/visual run against real claims: subject
 8's Lizzie Borden material (date_anchor LIKE '1893%'), through
 plan_cards -> assign_durations -> assign_motion -> render_cards, to a
-real mp4 in data/renders/scratch_visual_narrated/.
+real mp4 in data/renders/scratch_visual_kokoro/.
 
-Extended to add real narration: this script now synthesizes actual
-speech per card (packages/voice/say_provider.py), measures its real
-duration via ffprobe, and uses those MEASURED durations to drive
-render_cards -- not assign_durations' word-count estimate.
-assign_durations is still called once, but only to report how far that
-estimate drifts from real speech now that real audio exists to compare
-against. That comparison, not the video itself, is the actual point of
-this run: it's what decides whether forced alignment is needed before
-this pipeline can be trusted at word-count timing alone.
+Extended to add real narration, then extended again to swap the
+narration engine: this script synthesizes actual speech per card --
+now via packages/voice/kokoro_provider.py, not
+packages/voice/say_provider.py -- measures its real duration via
+ffprobe, and uses those MEASURED durations to drive render_cards, not
+assign_durations' word-count estimate. assign_durations is still
+called once, but only to report how far that estimate drifts from real
+speech now that real audio exists to compare against. That comparison,
+not the video itself, is the actual point of this run: it's what
+decides whether forced alignment is needed before this pipeline can be
+trusted at word-count timing alone.
+
+Kokoro is noticeably slower than say -- a real model inference pass
+per clip, not a lightweight system call -- so this run prints progress
+per clip and a total synthesis wall-clock time at the end, rather than
+running 22 clips silently.
+
+Output moved to data/renders/scratch_visual_kokoro/, a different
+directory from the say version (data/renders/scratch_visual_narrated/),
+so both stay on disk side by side for comparison.
 
 SCOPE: read-only database access. SELECT only -- the engine below is
 opened in SQLite's own read-only URI mode (confirmed empirically to
@@ -41,11 +52,14 @@ script.
 
 Usage:
     uv run python -m scripts.render_scratch_visual
+    uv run python -m scripts.render_scratch_visual --voice af_bella
 """
 
 from __future__ import annotations
 
+import argparse
 import subprocess
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -59,10 +73,11 @@ from packages.visual.palette import palette_for
 from packages.visual.planner import ClaimRecord, PlannedCard, plan_cards
 from packages.visual.render import FFMPEG_BIN, render_cards
 from packages.visual.timing import CHAPTER_TITLE_SECONDS, assign_durations, total_runtime
-from packages.voice.say_provider import SayProvider
+from packages.voice.kokoro_provider import DEFAULT_VOICE_NAME, DEFAULT_WPM, KokoroProvider
+from packages.voice.provider import VoiceSpec
 
 DB_PATH = Path("data/casefile.db")
-OUT_DIR = Path("data/renders/scratch_visual_narrated")
+OUT_DIR = Path("data/renders/scratch_visual_kokoro")
 
 # Deliberate, non-negotiable -- see module docstring.
 SUBJECT_ID = 8
@@ -181,19 +196,33 @@ def _probe_duration(path: Path) -> float:
     return float(result.stdout.strip())
 
 
-def _synthesize_narration(cards: list[PlannedCard], out_dir: Path) -> list[Path]:
-    """One WAV per card, in card order -- real speech via SayProvider
+def _synthesize_narration(cards: list[PlannedCard], out_dir: Path, voice_name: str) -> list[Path]:
+    """One WAV per card, in card order -- real speech via KokoroProvider
     for statement/attribution/timeline cards, a silent
-    CHAPTER_TITLE_SECONDS clip for chapter_title cards."""
-    provider = SayProvider()
+    CHAPTER_TITLE_SECONDS clip for chapter_title cards. DEFAULT_WPM is
+    passed only because VoiceSpec requires a wpm value; KokoroProvider
+    ignores it unconditionally (see that module's own docstring) --
+    passing it here is not claiming Kokoro has a real rate to set.
+
+    Kokoro is a real model inference pass per clip, not a lightweight
+    system call like say -- prints progress per clip so a 22-clip run
+    isn't a silent wait."""
+    provider = KokoroProvider(VoiceSpec(voice_name=voice_name, wpm=DEFAULT_WPM))
+    total = len(cards)
     paths: list[Path] = []
     for i, card in enumerate(cards):
         out_path = out_dir / f"narration_{i:04d}.wav"
         text = _card_narration_text(card)
+        clip_start = time.perf_counter()
         if text is None:
             _generate_silent_wav(CHAPTER_TITLE_SECONDS, out_path)
         else:
             provider.synthesize(text, out_path)
+        clip_elapsed = time.perf_counter() - clip_start
+        print(
+            f"  [{i + 1:>2}/{total}] {card.kind:<13} claim_id={card.claim_id!s:<5} "
+            f"{clip_elapsed:5.2f}s"
+        )
         paths.append(out_path)
     return paths
 
@@ -248,7 +277,20 @@ def _report_longest_cards(
         )
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--voice",
+        default=DEFAULT_VOICE_NAME,
+        help=f"Kokoro voice name (default: {DEFAULT_VOICE_NAME})",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = _parse_args()
+    print(f"voice: {args.voice}")
+
     engine = create_engine(f"sqlite:///file:{DB_PATH}?mode=ro&uri=true")
     with Session(engine) as session:
         records, labeled_count = _fetch_claim_records(session)
@@ -273,7 +315,15 @@ def main() -> None:
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    narration_paths = _synthesize_narration(cards, OUT_DIR)
+    print(f"synthesizing {len(cards)} clips (voice={args.voice})...")
+    synthesis_start = time.perf_counter()
+    narration_paths = _synthesize_narration(cards, OUT_DIR, args.voice)
+    synthesis_elapsed = time.perf_counter() - synthesis_start
+    print(
+        f"total synthesis wall-clock time: {synthesis_elapsed:.3f}s "
+        f"({_format_mmss(synthesis_elapsed)})"
+    )
+
     measured_durations = [_probe_duration(p) for p in narration_paths]
     measured_runtime = total_runtime(measured_durations)
     print(
