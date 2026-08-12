@@ -18,6 +18,9 @@ dependencies = [
     "pypdf>=5.0",
     "google-genai>=2.16.0",
     "pillow>=12.3.0",
+    "kokoro>=0.9.4",
+    "soundfile>=0.14.0",
+    "huggingface-hub>=1.27.0",
 ]
 
 [dependency-groups]
@@ -52,3 +55,12 @@ python_version = "3.12"
 strict = true
 mypy_path = "."
 exclude = ["^data/"]
+
+# soundfile and kokoro ship no type stubs and no py.typed marker --
+# confirmed by mypy itself (import-untyped), not assumed. This does not
+# weaken checking of this project's own code: everything downstream of
+# these two imports (packages/voice/kokoro_provider.py) is still
+# checked normally against whatever types those calls return.
+[[tool.mypy.overrides]]
+module = ["soundfile", "kokoro", "kokoro.*"]
+ignore_missing_imports = true
