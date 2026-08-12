@@ -24,6 +24,7 @@ from sqlalchemy.orm import Mapper
 from sqlmodel import select
 
 import packages.strategies.criminal_cases  # noqa: F401  registers the criminal-cases strategy
+import packages.strategies.film_tv_news  # noqa: F401  registers the film-tv-news strategy
 from packages.db.models import (
     Claim,
     ClaimSource,
