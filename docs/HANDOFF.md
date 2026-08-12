@@ -352,6 +352,41 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
     thresholds routinely — given this measured result, that is now **the reason to build
     them next, not a stated preference**.
 
+### Strategy 3 (film-tv-news), and a sharper claim-duplication number
+
+33. **`Subject.resolution_status` has no meaningful value for film-tv-news; the decision is to
+    use `OFFICIALLY_RULED` as an inert placeholder rather than migrate the enum.**
+    `resolution_status: ResolutionStatus` is a required, non-nullable column shared by every
+    strategy (`packages/db/models.py`), and all five `ResolutionStatus` values (`CONVICTED`,
+    `ACQUITTED`, `UNSOLVED`, `OFFICIALLY_RULED`, `DISPUTED`) are criminal-justice vocabulary
+    with no reading for a weekly entertainment-industry topic. `film-tv-news`'s own scorer
+    (`packages/strategies/film_tv_news/eligibility.py`) reads nothing from this field, by
+    design, rather than picking a value and pretending it means something — but every real
+    film-tv-news `Subject` still has to write *something* into the column. `OFFICIALLY_RULED`
+    is the placeholder because it reads closest to "not in dispute, nothing to resolve," and it
+    is inert by construction here since nothing checks it for this strategy. The real fix would
+    be migrating `ResolutionStatus` into a strategy-owned enum the way `RiskFlag` and the
+    category enums already are; that is a schema change and out of scope for this decision.
+34. **`subject_id=8` measures 79 claim rows but only 38 distinct claims at 0.75 similarity —
+    roughly 52% duplication, measured, not eyeballed** (`scripts/measure_claim_duplication.py`).
+    The same restatement pattern appears across all three cases sharing that subject row
+    (Borden, Antonio Long, and Hinterkaifeck alike), so this is extraction behavior, not a
+    fixture artifact specific to one case. `MIN_TOTAL_CLAIM_COUNT` and the word budget it drives
+    (`packages/script/chronological.py`) both count rows, not distinct facts, and are inflated
+    accordingly: `WORDS_PER_CLAIM = 18` was itself measured on composed output where duplicates
+    had already been folded together by the model, so `total_words = claim_count *
+    WORDS_PER_CLAIM` overestimates by roughly 2x against raw claim counts. Sharpens finding
+    #27's earlier, cruder estimate ("roughly 8 distinct facts" from 45 rows) into a validated
+    number.
+35. **Trade-source reachability for film-tv-news is measured, and it clears easily.**
+    `variety.com`, `hollywoodreporter.com`, `deadline.com`, `thewrap.com`, and `indiewire.com`
+    all allow fetching under `robots.txt` and extract 2000-4100 characters of real body text
+    from one real, current article apiece. `boxofficemojo.com` is robots-disallowed via an
+    allowlist naming only named crawlers (Googlebot, bingbot, and similar), citing IMDb's
+    anti-scraping terms directly in the file. 5/6 domains reachable, against 1/13 archives
+    tried for strategy 1's own hardest case (finding #23) — direct, measured evidence for §11's
+    stated expectation that strategies 2 and 3 have sources strategy 1 does not.
+
 ---
 
 ## 8. Entity extraction: validated
