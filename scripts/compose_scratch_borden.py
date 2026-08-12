@@ -33,12 +33,23 @@ ffprobe duration measurement, and the concat/mux ffmpeg steps are
 identical whether a card's text came from a claim statement or a
 composed sentence.
 
+After composition, this reports a rough claim-coverage measurement --
+a substring-match heuristic, not a real entailment check, see
+_measure_claim_coverage's own docstring -- and, with --no-render, stops
+right there: composed text plus the coverage report, no narration, no
+render, no mux. That's the fast loop for rereading and rewriting THESIS
+without spending the wall-clock time a full render costs -- it does
+not spend a second Gemini call either way; --no-render only skips
+local, no-quota work.
+
 Usage:
     uv run python -m scripts.compose_scratch_borden
+    uv run python -m scripts.compose_scratch_borden --no-render
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import os
 import re
@@ -104,14 +115,26 @@ def _fetch_claims_for_composition(session: Session) -> list[ClaimForComposition]
     (18, measured) for every claim, uniform -- see module docstring on
     why the 60/40 split ClaimForComposition's own docstring still
     describes does not apply; that docstring is stale, not this call
-    site."""
+    site.
+
+    Ordered by date_anchor, then id as a tiebreak -- id order is not
+    date order in general. Checked directly against this real 22-claim
+    set, though: every one of them carries the identical date_anchor
+    ('1893-06-20', the single date source_7's one newspaper article
+    reports on), so this ordering is byte-identical to id order for
+    this specific run. The fix is still correct to make -- it's the
+    right rule for any claim set that actually spans multiple dates --
+    but it is not what caused the previous run's verdict-first
+    ordering, since there is no date signal here to reorder by. That
+    ordering came from Gemini's own compositional choice, not claim
+    input order."""
     query = (
         select(Claim)
         .where(
             Claim.subject_id == SUBJECT_ID,
             col(Claim.date_anchor).like(f"{DATE_PREFIX}%"),
         )
-        .order_by(col(Claim.id))
+        .order_by(col(Claim.date_anchor), col(Claim.id))
     )
     claims = session.exec(query).all()
 
@@ -153,6 +176,64 @@ def _split_sentences(text: str) -> list[str]:
     return merged
 
 
+_COVERAGE_STOPWORDS = frozenset(
+    """
+    the a an of to and in on at for with by from as is was were are be
+    been being that this these those which who whom his her their its
+    it he she they we you i not no than then so but or if into out up
+    down over under after before during between within without about
+    across around near far more most less least very just also only
+    even still yet already now here there when where why how what had
+    has have did do does would could should will shall may might s t
+    """.split()
+)
+
+
+def _rarest_word(statement: str) -> str:
+    """The longest word in the statement not in a small stopword list,
+    lowercased -- crude, not real term-frequency analysis. "Rarest"
+    here just means "least likely to appear by coincidence in
+    unrelated prose"; for a hand-written claim statement, that's
+    usually its longest, most specific word (a name, a place, a
+    distinctive noun), not a real corpus-frequency measurement."""
+    words = re.findall(r"[A-Za-z']+", statement.lower())
+    candidates = [w for w in words if w not in _COVERAGE_STOPWORDS]
+    return max(candidates, key=len) if candidates else ""
+
+
+def _measure_claim_coverage(
+    claims: list[ClaimForComposition], composed_text: str
+) -> tuple[list[ClaimForComposition], list[ClaimForComposition]]:
+    """Rough heuristic, not a real entailment check: a claim counts as
+    represented if its rarest word (see _rarest_word) appears anywhere
+    in the composed text, case-insensitive substring match. This both
+    over-counts (a coincidentally-shared "rarest" word) and
+    under-counts (a claim genuinely covered but paraphrased away from
+    its own most distinctive word) -- the point is a ballpark number,
+    not precision. Returns (represented, missing)."""
+    composed_lower = composed_text.lower()
+    represented: list[ClaimForComposition] = []
+    missing: list[ClaimForComposition] = []
+    for claim in claims:
+        token = _rarest_word(claim.statement)
+        if token and token in composed_lower:
+            represented.append(claim)
+        else:
+            missing.append(claim)
+    return represented, missing
+
+
+def _report_claim_coverage(claims: list[ClaimForComposition], composed_text: str) -> None:
+    represented, missing = _measure_claim_coverage(claims, composed_text)
+    print(
+        f"claim coverage (rough heuristic, substring match on each claim's "
+        f"longest non-stopword -- not a real entailment check): "
+        f"{len(represented)}/{len(claims)} represented, {len(missing)} not"
+    )
+    for claim in missing:
+        print(f"  claim_id={claim.claim_id}  {claim.statement[:60]}")
+
+
 def _build_cards(sentences: list[str]) -> list[PlannedCard]:
     cards: list[PlannedCard] = [
         PlannedCard(
@@ -168,7 +249,18 @@ def _build_cards(sentences: list[str]) -> list[PlannedCard]:
     return cards
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--no-render",
+        action="store_true",
+        help="Stop after the composed text and coverage report; skip narration/render/mux.",
+    )
+    return parser.parse_args()
+
+
 async def main() -> int:
+    args = _parse_args()
     load_dotenv()  # .env is not loaded automatically anywhere else yet
 
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -199,6 +291,11 @@ async def main() -> int:
     print()
     print(result.text)
     print()
+
+    _report_claim_coverage(claims, result.text)
+
+    if args.no_render:
+        return 0
 
     sentences = _split_sentences(result.text)
     print(f"sentences: {len(sentences)}")
