@@ -92,11 +92,23 @@ DATE_PREFIX = "1893"
 ARCHITECTURE = "chronological"
 CHAPTER_TITLE = "Fall River, 1893"
 
+# Prepended to the thesis text below rather than sent to the provider
+# or system instruction separately: thesis text is the only channel
+# into compose_section_text's existing validated prompt, so ordering
+# instructions ride along inside it rather than opening a second one.
+_NARRATIVE_ORDER_INSTRUCTION = (
+    "Narrate events in the order they occurred during the trial, not in "
+    "order of importance. Begin with the earliest proceedings and end "
+    "with the verdict. Where several claims state the same fact, state "
+    "it once."
+)
+
 # Editable by hand between runs -- a module constant, not an argparse
 # flag, because the point is to read the composed output and rewrite
 # this, not script around it.
 THESIS = (
-    "The Borden case was decided less by physical evidence than by "
+    _NARRATIVE_ORDER_INSTRUCTION
+    + " The Borden case was decided less by physical evidence than by "
     "what the jury was willing to believe about a woman of her standing."
 )
 
@@ -267,6 +279,8 @@ async def main() -> int:
     if not api_key:
         print("GEMINI_API_KEY is not set (see .env.example).", file=sys.stderr)
         return 1
+
+    print(f"thesis: {THESIS}")
 
     engine = create_engine(f"sqlite:///file:{DB_PATH}?mode=ro&uri=true")
     with Session(engine) as session:
