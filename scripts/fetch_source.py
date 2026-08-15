@@ -22,7 +22,13 @@ import httpx
 from packages.db.session import get_session
 from packages.research.boilerplate import LikelyBoilerplateError
 from packages.research.extraction import EmptyExtractionError
-from packages.research.fetch import DuplicateSourceContentError, FetchFailedError, SourceFetcher
+from packages.research.fetch import (
+    DuplicateSourceContentError,
+    FetchFailedError,
+    SourceFetcher,
+    UnknownSubjectError,
+    UnknownSubjectStrategyError,
+)
 from packages.research.robots import RobotsDisallowedError, RobotsUnreachableError
 from packages.research.tiering import TierCBlockedDomainError
 
@@ -34,6 +40,8 @@ FETCH_ERRORS = (
     EmptyExtractionError,
     LikelyBoilerplateError,
     DuplicateSourceContentError,
+    UnknownSubjectError,
+    UnknownSubjectStrategyError,
 )
 
 

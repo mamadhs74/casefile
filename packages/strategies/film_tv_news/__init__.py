@@ -4,16 +4,19 @@ registration pattern exactly -- see that module's own docstring for why
 importing this package registers it with packages.research.dispatch as a
 side effect.
 
-Unlike criminal_cases, nothing here imports this package for that side
-effect yet: packages/db/listeners.py's registration import is Tier 2 per
-CLAUDE.md (it names listeners.py explicitly), so it is not touched by this
-change. Until something imports packages.strategies.film_tv_news, this
-strategy is defined and independently testable but not reachable through
-the live dispatch registry the API and DB listeners use.
+Also imports .tiering for its own import-time side effect: registering
+this strategy's tier assigner with packages.research.tiering, the same
+pattern used for dispatch just above. See packages/strategies/
+film_tv_news/tiering.py's own docstring for why this strategy, unlike
+criminal_cases, has one at all.
+
+packages/db/listeners.py imports this package for both side effects --
+that import is Tier 2 per CLAUDE.md (it names listeners.py explicitly).
 """
 
 from __future__ import annotations
 
+import packages.strategies.film_tv_news.tiering  # noqa: F401  registers the tier assigner
 from packages.research.dispatch import StrategyDefinition, register_strategy
 from packages.strategies.film_tv_news.attributes import Attributes
 from packages.strategies.film_tv_news.eligibility import score_topic

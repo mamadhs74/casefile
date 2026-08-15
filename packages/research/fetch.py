@@ -30,7 +30,12 @@ Order matters and is deliberate:
    of the same article under a second URL is not a new, independent
    source; see Source's own docstring in packages/db/models.py for why
    this matters to R1's gate.
-7. Tier assignment -- packages/research/tiering.py, never Tier A.
+7. Tier assignment -- packages/research/tiering.py, per-strategy since
+   that module's own strategy-registration change (see its docstring).
+   When the caller doesn't override tier explicitly, this now resolves
+   the subject's own strategy first (Subject -> Strategy, both by id),
+   which this fetcher previously never needed to look up at all -- see
+   UnknownSubjectError / UnknownSubjectStrategyError below.
 8. Write extracted text to disk, then persist the Source row.
 
 Async throughout (matching docs/ARCHIVE-SPEC.md's established pattern for
@@ -51,7 +56,7 @@ from urllib.parse import urlsplit
 import httpx
 from sqlmodel import Session, select
 
-from packages.db.models import Source
+from packages.db.models import Source, Strategy, Subject
 from packages.domain.enums import SourceTier
 from packages.domain.urls import derive_domain
 from packages.research.boilerplate import DomainSampleCache, LikelyBoilerplateError
@@ -103,6 +108,31 @@ class DuplicateSourceContentError(Exception):
         )
 
 
+class UnknownSubjectError(Exception):
+    """subject_id does not identify a real Subject. Only reachable via the
+    auto-tier path (tier=None): assign_initial_tier now needs the
+    subject's strategy, which this fetcher previously never had to look
+    up at all. FK enforcement is off project-wide (see Episode.
+    cold_open_claim_id's own docstring in packages/db/models.py), so a
+    bad subject_id previously reached session.commit() and either failed
+    there or silently wrote an orphaned Source; this raises earlier and
+    more clearly instead."""
+
+    def __init__(self, subject_id: int) -> None:
+        self.subject_id = subject_id
+        super().__init__(f"unknown subject: {subject_id!r}")
+
+
+class UnknownSubjectStrategyError(Exception):
+    """subject.strategy_id does not identify a real Strategy -- the same
+    kind of gap UnknownSubjectError covers, one join further out."""
+
+    def __init__(self, subject_id: int, strategy_id: int) -> None:
+        self.subject_id = subject_id
+        self.strategy_id = strategy_id
+        super().__init__(f"subject {subject_id!r} references unknown strategy {strategy_id!r}")
+
+
 class SourceFetcher:
     """Holds the shared httpx.AsyncClient, robots.txt cache, rate limiter,
     and domain-reference-sample cache across multiple fetches -- an
@@ -145,10 +175,13 @@ class SourceFetcher:
         """title/publisher/published_date/tier are caller overrides; where
         omitted, title/publisher/published_date fall back to best-effort
         extraction metadata (frequently absent, especially for PDFs), and
-        tier falls back to packages.research.tiering.assign_initial_tier()
-        -- which never returns a Tier A value. Promoting to Tier A is a
-        deliberate human action after review, not something this method
-        does implicitly by accepting a tier=None default.
+        tier falls back to packages.research.tiering.assign_initial_tier(),
+        resolved against this subject's own strategy. Whether that can
+        ever return a Tier A value is now that strategy's own call, not a
+        blanket rule this method enforces -- see that module's docstring.
+        For every strategy that hasn't registered its own tier assigner,
+        nothing changes: still never Tier A, still a deliberate human
+        action after review to get there.
         """
         check_not_tier_c(url)
 
@@ -179,6 +212,12 @@ class SourceFetcher:
 
         text_path = self._write_text(subject_id, text_sha256, extracted.text)
 
+        if tier is not None:
+            resolved_tier = tier
+        else:
+            strategy_slug = _resolve_strategy_slug(session, subject_id)
+            resolved_tier = assign_initial_tier(url, strategy_slug)
+
         source = Source(
             subject_id=subject_id,
             url=url,
@@ -186,7 +225,7 @@ class SourceFetcher:
             title=title or extracted.title or "",
             published_date=published_date or extracted.published_date,
             retrieved_at=datetime.now(UTC),
-            tier=tier if tier is not None else assign_initial_tier(url),
+            tier=resolved_tier,
             text_path=str(text_path),
             text_sha256=text_sha256,
             word_count=extracted.word_count,
@@ -260,6 +299,18 @@ class SourceFetcher:
         path = directory / f"{text_sha256}.txt"
         path.write_text(text, encoding="utf-8")
         return path
+
+
+def _resolve_strategy_slug(session: Session, subject_id: int) -> str:
+    subject = session.get(Subject, subject_id)
+    if subject is None:
+        raise UnknownSubjectError(subject_id)
+
+    strategy = session.get(Strategy, subject.strategy_id)
+    if strategy is None:
+        raise UnknownSubjectStrategyError(subject_id, subject.strategy_id)
+
+    return strategy.slug
 
 
 def _find_by_url(session: Session, subject_id: int, url: str) -> Source | None:
