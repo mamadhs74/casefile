@@ -10,10 +10,19 @@ change, no migration.
 QUOTA: claim extraction costs Gemini calls. At most 5 articles are ever
 processed (one per required domain), so at most 5 extraction calls are
 ever made; an explicit counter still guards against exceeding that if
-the loop is ever changed. An article under PAYWALL_CHAR_THRESHOLD chars
-is reported and skipped before any extraction call is attempted, so
-quota is never spent on unusable text. No retries: a failed fetch or a
-failed extraction is reported and the run moves on to the next article.
+the loop is ever changed, and it now counts every extraction *attempt*,
+not just successes, so a provider failure still consumes its slot rather
+than letting the run retry the next article for free. An article under
+PAYWALL_CHAR_THRESHOLD chars is reported and skipped before any
+extraction call is attempted, so quota is never spent on unusable text.
+No retries at this layer: a failed fetch or a failed extraction is
+reported and the run moves on to the next article -- this includes
+google.genai.errors.APIError (ServerError's own base class, so this
+also covers ServerError -- a 503 already survived tenacity's internal
+retries inside gemini_provider.py before reaching here; retrying again
+at this layer would just be silently spending more quota on the same
+failure). A single provider failure used to abort the entire run and
+print nothing, four real runs' worth of cost before this was fixed.
 
 --subject-id: not asked for in the task this was built under, but
 Source.subject_id is a required, non-nullable foreign key
@@ -51,9 +60,10 @@ from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
-from sqlmodel import Session
+from google.genai.errors import APIError
+from sqlmodel import Session, select
 
-from packages.db.models import Strategy, Subject
+from packages.db.models import Claim, ClaimSource, Strategy, Subject
 from packages.db.session import get_session
 from packages.domain.urls import derive_domain
 from packages.research.claim_extraction import ExtractedClaim, extract_claims_for_source
@@ -67,6 +77,11 @@ from packages.visual.timing import NARRATION_WPM
 from scripts.fetch_source import FETCH_ERRORS
 from scripts.measure_claim_duplication import DEFAULT_THRESHOLD, ClaimText, _cluster
 from scripts.render_scratch_visual import _format_mmss
+
+# Genuine failures worth calling out in the "failed articles" summary list,
+# as opposed to expected control-flow outcomes (a paywall skip, a source
+# already extracted in an earlier run, this run's own domain/quota checks).
+_FAILURE_NOTES = frozenset({"fetch_failed", "extraction_failed", "api_error"})
 
 REQUIRED_DOMAINS: tuple[str, ...] = (
     "variety.com",
@@ -124,6 +139,38 @@ def _check_subject(session: Session, subject_id: int) -> str | None:
     return None
 
 
+def _existing_claims_for_source(session: Session, source_id: int) -> list[ExtractedClaim]:
+    """Read-only reconstruction of a source's already-extracted claims, for
+    a source extract_claims_for_source skips (skipped_already_extracted).
+    Zero quota cost -- nothing here calls the provider. Needed so the
+    claims/1000-chars figure means something for a source extracted in an
+    earlier run, rather than reading 0 just because this run didn't spend
+    a new call on it."""
+    rows = session.exec(
+        select(Claim, ClaimSource).where(
+            ClaimSource.claim_id == Claim.id,
+            ClaimSource.source_id == source_id,
+        )
+    ).all()
+    claims: list[ExtractedClaim] = []
+    for claim, claim_source in rows:
+        assert claim.id is not None
+        claims.append(
+            ExtractedClaim(
+                claim_id=claim.id,
+                statement=claim.statement,
+                category=claim.category,
+                claim_type=claim.claim_type,
+                confidence=claim.confidence,
+                date_anchor=claim.date_anchor,
+                quoted_span=claim_source.quoted_span,
+                span_start=claim_source.span_start,
+                span_end=claim_source.span_end,
+            )
+        )
+    return claims
+
+
 async def _process_articles(
     session: Session,
     fetcher: SourceFetcher,
@@ -170,17 +217,29 @@ async def _process_articles(
             results.append(fetched(note="quota_guard"))
             continue
 
+        # Counts the attempt, not just a success -- a provider failure
+        # still consumed its slot under MAX_EXTRACTION_CALLS, see module
+        # docstring.
+        extraction_calls_made += 1
         try:
             extraction = await extract_claims_for_source(session, source, claim_provider)
         except ExtractionProviderError as exc:
             print(f"  EXTRACTION FAILED: {exc}")
             results.append(fetched(note="extraction_failed"))
             continue
-        extraction_calls_made += 1
+        except APIError as exc:
+            print(f"  EXTRACTION FAILED: {type(exc).__name__} {exc.code}: {exc.message}")
+            results.append(fetched(note="api_error"))
+            continue
 
         if extraction.skipped_already_extracted:
-            print("  NOTE: source already had linked claims -- 0 new claims, no quota spent")
-            results.append(fetched(note="already_extracted"))
+            assert source.id is not None
+            existing = _existing_claims_for_source(session, source.id)
+            print(
+                f"  NOTE: source already had linked claims -- 0 new claims, no quota "
+                f"spent ({len(existing)} existing)"
+            )
+            results.append(fetched(note="already_extracted", raw_claims=existing))
             continue
 
         print(f"  raw claims: {len(extraction.claims)}")
@@ -221,10 +280,20 @@ def _print_summary(subject_id: int, articles: list[ArticleResult]) -> None:
 
         raw_total += raw_count
         distinct_total += distinct_count
+        rate = raw_count / article.char_count * 1000 if article.char_count else 0.0
         note = f"  ({article.note})" if article.note else ""
-        print(f"  {article.domain:<24} raw={raw_count:<4} distinct={distinct_count:<4}{note}")
+        print(
+            f"  {article.domain:<24} raw={raw_count:<4} distinct={distinct_count:<4} "
+            f"claims/1000ch={rate:<6.2f}{note}"
+        )
 
     print(f"  {'TOTAL':<24} raw={raw_total:<4} distinct={distinct_total:<4}")
+
+    failed = [a for a in articles if a.note in _FAILURE_NOTES]
+    if failed:
+        print(f"failed articles ({len(failed)}):")
+        for article in failed:
+            print(f"  {article.domain} ({article.note})")
 
     dup_rate = (raw_total - distinct_total) / raw_total * 100 if raw_total else 0.0
     print(f"duplication rate: {dup_rate:.1f}%")
