@@ -387,6 +387,71 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
     tried for strategy 1's own hardest case (finding #23) — direct, measured evidence for §11's
     stated expectation that strategies 2 and 3 have sources strategy 1 does not.
 
+### Strategy 3: the gate passes, measured, and why
+
+36. **R1's source-diversity gate passes for film-tv-news, measured against a real subject.**
+    Subject 10, five real trade articles: `verified_source_count=5`, `tier_a_source_count=5`,
+    `distinct_domain_count=5`, against that strategy's own `3/1/3` threshold. Direct comparison
+    to finding #32: strategy 1's only sourced subject scored `1/1/1` against the same shape of
+    gate and failed two of three conditions. The gate that blocks strategy 1 is cleared for
+    strategy 3 — not a projection, a measured run.
+37. **Claim duplication for film-tv-news is 0.0%, measured the same way finding #34 measured
+    ~52% for `subject_id=8`.** Single-linkage clustering at 0.75 similarity
+    (`scripts/measure_claim_duplication.py`) on the aggregate film-tv-news subject: 32 raw
+    claims, 32 distinct. The mechanism is structural, not incidental: `subject_id=8` accumulates
+    the same handful of facts (a verdict, a deliberation time) restated by many near-identical
+    sentences about one event, while a film-tv-news subject aggregates several unrelated
+    stories in one week, and no two source articles restate the same fact across different
+    stories. Aggregating by week rather than by event is what eliminates the restatement
+    problem, not a difference in extraction quality.
+38. **Claim yield per article splits sharply by article type, measured in claims per 1000
+    extracted characters** (`scripts/measure_film_tv_yield.py`'s own figure, added for exactly
+    this reason): `hollywoodreporter.com` 2.96, `deadline.com` 3.45 — both conventional
+    reporting — against `variety.com` 0.60 (a streaming listicle) and `indiewire.com` 0.55 (a
+    festival-lineup announcement). Sourcing for this strategy should target reporting and skip
+    roundups/listicles; a listicle's high character count is not high claim density. Four
+    articles yielded 32 distinct claims — `32 * WORDS_PER_CLAIM (18) = 576` words, `576 / 150
+    wpm * 60 = 3:50` — a real per-run runtime figure from real yield, not an assumption.
+39. **`assign_initial_tier` is strategy-aware; `strategy_slug` is now a required parameter.**
+    "Heuristics may never write Tier A" was criminal-cases' own rule, not a global one:
+    contemporaneity for a criminal case requires comparing an event date to a publication
+    date, real human judgment a domain alone cannot make. It doesn't hold for film-tv-news,
+    where a Subject spans one week and every source is published within days of the event it
+    reports — contemporaneity there is structural, not a case-by-case call. criminal-cases'
+    own behavior is unchanged and proven so by test (`tests/test_tiering.py`, plus every
+    existing `packages/research/fetch.py` test staying green unedited). Per-strategy tiering
+    rules now live in `packages/strategies/<slug>/tiering.py`, registered into
+    `packages/research/tiering.py` via `register_tier_assigner` as an import side effect,
+    mirroring how eligibility scoring is already strategy-owned. A strategy that registers
+    nothing fails safe to `UNVERIFIED` — this is what keeps the change from silently applying
+    to a future strategy nobody has reviewed.
+
+### Gemini free-tier reliability, measured
+
+40. **Gemini free-tier `503 UNAVAILABLE` is a sustained condition, not a transient spike.**
+    Five separate occurrences across several hours of real use, each surviving
+    `gemini_provider.py`'s own internal tenacity retries before finally raising. Five
+    independent failures spread over hours, each one having already retried and still failed,
+    is deprioritization under load, not a momentary blip a single retry would paper over —
+    this is a real throughput constraint on the pipeline, not a bug to fix by retrying harder.
+    `scripts/measure_film_tv_yield.py` now catches `google.genai.errors.APIError` per article
+    and prints partial results instead of aborting the whole run on the first 503 — a fix
+    forced by four runs that produced nothing.
+
+### Narration timing, measured
+
+41. **Word-count-based narration duration is a planning aid only; rendering must use measured
+    audio, not an estimate.** `say -r 150` measured 11.72s for a 30-word card against a
+    12.0s word-count prediction; Kokoro's `af_heart` measured 11.58s for the same 30 words —
+    both real voices land close to the word-count model in isolation. Across a real 23-card
+    Borden episode, though, the aggregate word-count estimate overshot the actual measured
+    audio by 17.7%, with individual card error ranging from -2.3s to +1.5s in both directions —
+    small per-card errors compound unevenly across a real episode's mix of card lengths in a
+    way a single 30-word sample can't surface. `packages/visual/render.py` and every render
+    script already only ever accept measured `ffprobe` durations, never word-count estimates,
+    for exactly this reason — this finding is the number behind that decision, recorded once
+    rather than re-derived per script.
+
 ---
 
 ## 8. Entity extraction: validated
