@@ -452,6 +452,38 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
     for exactly this reason — this finding is the number behind that decision, recorded once
     rather than re-derived per script.
 
+### Claim/section schema facts, and subject 10's first real tagging pass
+
+42. **Four schema facts this document was wrong about or silent on — corrected here so a
+    fresh session doesn't inherit the same wrong mental model.** `Claim` has no `source_id`
+    column; a claim's source is `ClaimSource` (a join table — `docs/SCHEMA.md`'s "exactly
+    one `ClaimSource` per claim" finding means it's a 1:1 in practice today, but the join is
+    real, not a denormalized FK). `Claim`'s text field is `statement`, not `text`. `Section`
+    (`packages/domain/enums.py`) is a **two-member** enum, `GROUND`/`RESOLUTION` only —
+    `NULL` means Sequence by design, not "unreviewed," and there is no ordinal or positional
+    section concept (no `section=1..5`, no one-section-per-source rule). Story grouping
+    within a subject already exists and needs no new mechanism: it's `ClaimSource.source_id`,
+    already populated by extraction. If "each story becomes one section" is encountered
+    again, it describes episode/composition format, not the `Claim.section` column. All four
+    surfaced from one request that assumed `source_id` lived on `Claim` and that `Section`
+    had five ordinal values tied to source count — neither is true, and this document had
+    nothing correct or incorrect to say about either until now.
+
+43. **Subject 10's `claim.section` is tagged, by hand, one-off — no script, matching
+    `thesis_bearing` and cold-open selection's existing editorial-act posture.** 2 `GROUND`
+    (claim 91, the Paramount–Warner Bros. merger's setup fact; claim 109, the Venice Film
+    Festival's dates/location), 6 `RESOLUTION` (93/95/96/98/99, the merger's completed
+    regulatory clearances; 101, the still-open California lawsuit, tagged under
+    `docs/ARCHITECTURES.md` §3's "unresolved threads named as unresolved" clause, not as a
+    completed clearance), 24 `NULL`. Claim 92 (the EC's *expected* approval) stayed `NULL`
+    deliberately — pending, not settled, so it reads as Sequence rather than Resolution.
+    Only one of subject 10's four source stories (the merger, `source_id=13` via
+    `ClaimSource`) has genuine Ground/Resolution shape; the other three — variety.com's eight
+    unrelated one-off items, deadline.com's box-office statistics, and indiewire.com's Venice
+    lineup facts past its one Ground claim — were left untagged on purpose, because there's
+    nothing in them to tag, not because they weren't reviewed. Composition not yet run
+    against subject 10.
+
 ---
 
 ## 8. Entity extraction: validated
