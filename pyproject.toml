@@ -21,6 +21,9 @@ dependencies = [
     "kokoro>=0.9.4",
     "soundfile>=0.14.0",
     "huggingface-hub>=1.27.0",
+    "google-api-python-client>=2.198.0",
+    "google-auth>=2.56.2",
+    "google-auth-oauthlib>=1.4.0",
 ]
 
 [dependency-groups]
@@ -63,4 +66,13 @@ exclude = ["^data/"]
 # checked normally against whatever types those calls return.
 [[tool.mypy.overrides]]
 module = ["soundfile", "kokoro", "kokoro.*"]
+ignore_missing_imports = true
+
+# googleapiclient ships no type stubs either -- same shape as the
+# override above, confirmed by mypy (import-untyped), not assumed.
+# google.oauth2 and google_auth_oauthlib are the same underlying gap
+# (they're part of the same untyped google-auth/google-api-python-client
+# distributions), only reachable from packages/publish/youtube.py.
+[[tool.mypy.overrides]]
+module = ["googleapiclient", "googleapiclient.*", "google.oauth2", "google.oauth2.*", "google_auth_oauthlib", "google_auth_oauthlib.*"]
 ignore_missing_imports = true

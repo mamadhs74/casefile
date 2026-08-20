@@ -10,12 +10,22 @@ pattern used for dispatch just above. See packages/strategies/
 film_tv_news/tiering.py's own docstring for why this strategy, unlike
 criminal_cases, has one at all.
 
-packages/db/listeners.py imports this package for both side effects --
-that import is Tier 2 per CLAUDE.md (it names listeners.py explicitly).
+Also imports .publish_template, same shape again: registers this
+strategy's YouTube title/description/tags template with
+packages.publish.templates. criminal-cases has no equivalent import --
+no template file exists for it yet, by design (see the task this was
+built under), so packages.publish.templates.get_publish_template
+raises UnknownPublishTemplateError if anything ever asks for one.
+
+packages/db/listeners.py imports this package for both of the first two
+side effects -- that import is Tier 2 per CLAUDE.md (it names
+listeners.py explicitly). The publish_template import doesn't change
+that: listeners.py itself is untouched by this addition.
 """
 
 from __future__ import annotations
 
+import packages.strategies.film_tv_news.publish_template  # noqa: F401  registers the publish template
 import packages.strategies.film_tv_news.tiering  # noqa: F401  registers the tier assigner
 from packages.research.dispatch import StrategyDefinition, register_strategy
 from packages.strategies.film_tv_news.attributes import Attributes

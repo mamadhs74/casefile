@@ -23,9 +23,9 @@ from packages.db.session import get_session
 from packages.script.chronological import generate_script
 from packages.script.composition_provider import ClaimForComposition
 from packages.script.gemini_composition_provider import (
+    _SYSTEM_INSTRUCTION,
     DEFAULT_MAX_OUTPUT_TOKENS,
     DEFAULT_MODEL,
-    _SYSTEM_INSTRUCTION,
     _build_contents,
 )
 from scripts.diagnose_gemini_503 import _DIAGNOSTIC_CLAIM, _DIAGNOSTIC_THESIS

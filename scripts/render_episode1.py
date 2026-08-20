@@ -1,19 +1,19 @@
 """Render the section-level card binding for Episode 1 (subject 10,
 the Paramount-Warner Bros. merger story) -- one card per SECTION
 (Ground, Sequence, Resolution), not one per claim and not one per
-composed sentence. Proves the render path end to end while Gemini is
-down (docs/HANDOFF.md), using hand-written stand-in prose in place of
-real composed text.
+composed sentence.
 
-STAND-IN TEXT: GROUND_TEXT / SEQUENCE_TEXT / RESOLUTION_TEXT below are
-hand-written, not Gemini output -- roughly 200 words total, split to
-match generate_script's own budgeted proportions for episode_id=1
-(Ground 20 / Sequence 129 / Resolution 28 words -- see
-scripts/create_subject10_episode.py and scripts/compose_subject10_episode.py,
-which hit a 503 before producing real text). Editable by hand between
-runs, same posture as compose_scratch_borden.py's own THESIS constant.
-Swap these for Episode 1's real composed text once compose_episode
-succeeds against real Gemini.
+SECTION TEXT SOURCE: parameterized, not hardcoded. If
+data/renders/episode1/composed_script.json exists (written by
+scripts/compose_subject10_episode.py only on a full successful
+composition run -- see that script's _write_output), its "ground" /
+"sequence" / "resolution" fields are used. If that file doesn't exist
+yet, this falls back to hand-written stand-in prose
+(_FALLBACK_GROUND_TEXT / _FALLBACK_SEQUENCE_TEXT /
+_FALLBACK_RESOLUTION_TEXT below, ~200 words total, split to match
+generate_script's own budgeted proportions for episode_id=1: Ground 20
+/ Sequence 129 / Resolution 28 words) -- so this still runs today with
+Gemini down. Which source was used is printed at the top of every run.
 
 Card binding is coarser than either existing scratch script: one
 PlannedCard per SECTION here, versus one per claim
@@ -46,6 +46,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import sys
 import time
 from pathlib import Path
@@ -66,19 +67,20 @@ from scripts.render_scratch_visual import (
 )
 
 OUT_DIR = Path("data/renders/episode1")
+COMPOSED_SCRIPT_PATH = OUT_DIR / "composed_script.json"
 
 EPISODE_ID = 1
 ARCHITECTURE = "chronological"
 
-# Hand-written stand-in prose -- see module docstring. Not Gemini
-# output. Section order fixed: Ground, Sequence, Resolution.
-GROUND_TEXT = (
+# Fallback stand-in prose -- used only when COMPOSED_SCRIPT_PATH doesn't
+# exist yet. Not Gemini output. See module docstring.
+_FALLBACK_GROUND_TEXT = (
     "By late 2026, Paramount was nearing completion of a $111 billion "
     "takeover of Warner Bros., a deal that would reshape the American "
     "media landscape."
 )
 
-SEQUENCE_TEXT = (
+_FALLBACK_SEQUENCE_TEXT = (
     "The European Commission signaled it would approve the merger, but "
     "only if Paramount gave up its joint venture with Universal "
     "Pictures. A Paramount spokesperson said the company had engaged "
@@ -94,34 +96,51 @@ SEQUENCE_TEXT = (
     "month, to challenge and block the merger outright."
 )
 
-RESOLUTION_TEXT = (
+_FALLBACK_RESOLUTION_TEXT = (
     "Regulators in China, South Africa, Saudi Arabia, Ukraine, Serbia, "
     "and North Macedonia all cleared the deal. The Justice Department "
     "signed off too, finding no market harm and requiring no "
     "divestitures anywhere in the settlement."
 )
 
-SECTIONS: list[tuple[str, str]] = [
-    ("Ground", GROUND_TEXT),
-    ("Sequence", SEQUENCE_TEXT),
-    ("Resolution", RESOLUTION_TEXT),
-]
+
+def _load_sections() -> list[tuple[str, str]]:
+    """composed_script.json is only ever written by
+    scripts/compose_subject10_episode.py's _write_output, and only on a
+    fully successful compose_episode run -- so its presence implies all
+    three fields below are populated; no partial-file handling here."""
+    if COMPOSED_SCRIPT_PATH.exists():
+        payload = json.loads(COMPOSED_SCRIPT_PATH.read_text())
+        print(f"section text source: {COMPOSED_SCRIPT_PATH} (real composed text)")
+        return [
+            ("Ground", payload["ground"]),
+            ("Sequence", payload["sequence"]),
+            ("Resolution", payload["resolution"]),
+        ]
+    print(f"section text source: fallback stand-in prose ({COMPOSED_SCRIPT_PATH} not found yet)")
+    return [
+        ("Ground", _FALLBACK_GROUND_TEXT),
+        ("Sequence", _FALLBACK_SEQUENCE_TEXT),
+        ("Resolution", _FALLBACK_RESOLUTION_TEXT),
+    ]
 
 
-def _build_cards() -> list[PlannedCard]:
+def _build_cards(sections: list[tuple[str, str]]) -> list[PlannedCard]:
     return [
         PlannedCard(kind="statement", claim_id=None, spec=StatementCardSpec(statement=text))
-        for _name, text in SECTIONS
+        for _name, text in sections
     ]
 
 
 def main() -> int:
-    total_words = sum(len(text.split()) for _name, text in SECTIONS)
-    print(f"stand-in text: {total_words} words across {len(SECTIONS)} sections")
-    for name, text in SECTIONS:
+    sections = _load_sections()
+
+    total_words = sum(len(text.split()) for _name, text in sections)
+    print(f"section text: {total_words} words across {len(sections)} sections")
+    for name, text in sections:
         print(f"  {name}: {len(text.split())} words")
 
-    cards = _build_cards()
+    cards = _build_cards(sections)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -129,10 +148,12 @@ def main() -> int:
     synthesis_start = time.perf_counter()
     narration_paths = _synthesize_narration(cards, OUT_DIR, DEFAULT_VOICE_NAME)
     synthesis_elapsed = time.perf_counter() - synthesis_start
-    print(f"synthesis wall-clock time: {synthesis_elapsed:.3f}s ({_format_mmss(synthesis_elapsed)})")
+    print(
+        f"synthesis wall-clock time: {synthesis_elapsed:.3f}s ({_format_mmss(synthesis_elapsed)})"
+    )
 
     measured_durations = [_probe_duration(p) for p in narration_paths]
-    for (name, _text), duration in zip(SECTIONS, measured_durations, strict=True):
+    for (name, _text), duration in zip(sections, measured_durations, strict=True):
         print(f"  {name}: measured {duration:.3f}s")
     measured_runtime = total_runtime(measured_durations)
     print(f"total measured runtime: {measured_runtime:.3f}s ({_format_mmss(measured_runtime)})")

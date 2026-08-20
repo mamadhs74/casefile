@@ -55,6 +55,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import cast
 
 from dotenv import load_dotenv
 
@@ -113,7 +114,7 @@ class CachingCompositionProvider:
 def _load_cache(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
-    return json.loads(path.read_text())
+    return cast("dict[str, str]", json.loads(path.read_text()))
 
 
 def _save_cache(path: Path, cache: dict[str, str]) -> None:
@@ -134,13 +135,15 @@ def _section_sequence(allocated: SectionedScript) -> list[str]:
 
 
 def _report(script: SectionedScript) -> None:
+    counts = script.actual_word_counts
+    budgets = script.budgeted_word_counts
     sections: list[tuple[str, str, int, int]] = [
-        ("Cold Open", script.cold_open, script.actual_word_counts.cold_open, script.budgeted_word_counts.cold_open),
-        ("Thesis", script.thesis, script.actual_word_counts.thesis, script.budgeted_word_counts.thesis),
-        ("Ground", script.ground, script.actual_word_counts.ground, script.budgeted_word_counts.ground),
-        ("Sequence", script.sequence, script.actual_word_counts.sequence, script.budgeted_word_counts.sequence),
-        ("Resolution", script.resolution, script.actual_word_counts.resolution, script.budgeted_word_counts.resolution),
-        ("Return", script.return_, script.actual_word_counts.return_, script.budgeted_word_counts.return_),
+        ("Cold Open", script.cold_open, counts.cold_open, budgets.cold_open),
+        ("Thesis", script.thesis, counts.thesis, budgets.thesis),
+        ("Ground", script.ground, counts.ground, budgets.ground),
+        ("Sequence", script.sequence, counts.sequence, budgets.sequence),
+        ("Resolution", script.resolution, counts.resolution, budgets.resolution),
+        ("Return", script.return_, counts.return_, budgets.return_),
     ]
     total_actual = 0
     for name, text, actual, budget in sections:

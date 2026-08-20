@@ -126,15 +126,23 @@ def _refuse_if_already_set_up(session: Session) -> None:
         found = {c.id for c in claims}
         missing = set(claim_ids) - found
         raise SetupAborted(f"refusing to run: claim id(s) {sorted(missing)} not found")
-    already_narratable = [c.id for c in claims if c.narratable]
+    already_narratable: list[int] = []
+    wrong_subject: list[int] = []
+    for c in claims:
+        assert c.id is not None  # a queried, persisted row always has one
+        if c.narratable:
+            already_narratable.append(c.id)
+        if c.subject_id != SUBJECT_ID:
+            wrong_subject.append(c.id)
     if already_narratable:
         raise SetupAborted(
             f"refusing to run: claim id(s) {sorted(already_narratable)} already "
             f"narratable=True -- expected all False going in"
         )
-    wrong_subject = [c.id for c in claims if c.subject_id != SUBJECT_ID]
     if wrong_subject:
-        raise SetupAborted(f"refusing to run: claim id(s) {sorted(wrong_subject)} not on subject {SUBJECT_ID}")
+        raise SetupAborted(
+            f"refusing to run: claim id(s) {sorted(wrong_subject)} not on subject {SUBJECT_ID}"
+        )
 
 
 def _check_foreign_keys(session: Session, label: str) -> None:
