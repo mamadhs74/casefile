@@ -35,6 +35,11 @@ from packages.db.models import (
     Strategy,
     Subject,
 )
+from packages.domain.content_safety import (
+    ClaimContentRejectedError,
+    check_text,
+    log_rejection,
+)
 from packages.domain.enums import TIER_A_SOURCE_TIERS
 from packages.domain.spans import locate_span
 from packages.domain.urls import derive_domain
@@ -114,6 +119,28 @@ def _reject_narratable_at_creation(
         raise NarratableSourcingError(
             "a claim cannot be created as narratable -- it has no sources yet"
         )
+
+
+@event.listens_for(Claim, "before_insert")
+def _reject_unsafe_claim_content(
+    mapper: Mapper[Any], connection: Connection, target: Claim
+) -> None:
+    """The unconditional floor of packages.domain.content_safety's
+    rejection filter -- see that module's docstring for why this is
+    statement-only (ClaimSource, which carries the source-content half
+    of the check, doesn't exist yet at this point) and why it exists
+    at all. No strategy, flag, or caller argument can skip this: it is
+    not parameterized, and it runs on every Claim insert regardless of
+    which code constructed the row."""
+    match = check_text(target.statement)
+    if match is not None:
+        log_rejection(
+            subject_id=target.subject_id,
+            source_label="<unknown at Claim.before_insert -- see module docstring>",
+            statement=target.statement,
+            match=match,
+        )
+        raise ClaimContentRejectedError(match)
 
 
 @event.listens_for(Claim, "before_update")

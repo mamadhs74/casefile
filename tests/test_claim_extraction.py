@@ -8,6 +8,7 @@ is a Protocol precisely so tests never need a real Gemini call).
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -370,6 +371,91 @@ async def test_zero_claims_on_non_tier_a_source_is_not_flagged(
     result = await extract_claims_for_source(session, source, provider)
 
     assert result.zero_claims_on_tier_a_source is False
+
+
+async def test_content_safety_match_in_statement_is_rejected_not_persisted(
+    session: Session, strategy_id: int, tmp_path: Path
+) -> None:
+    """The "source content" half of packages.domain.content_safety's
+    filter, checked inside this pipeline (the other half, statement-only,
+    is the unconditional packages/db/listeners.py floor -- see
+    tests/test_content_safety.py). Matches on the candidate's own
+    assertion here, not the quoted_span."""
+    subject_id = _persist_subject(session, strategy_id)
+    source = _make_source(session, subject_id, tmp_path)
+    provider = _FakeProvider(
+        [_valid_candidate(assertion="Long was convicted of criminal sexual conduct with a minor.")]
+    )
+
+    result = await extract_claims_for_source(session, source, provider)
+
+    assert result.claims == []
+    assert result.rejected[0].reason == "content_safety_rejected"
+    assert session.exec(select(Claim)).all() == []
+
+
+async def test_content_safety_match_in_source_content_is_rejected(
+    session: Session, strategy_id: int, tmp_path: Path
+) -> None:
+    """A clean-looking assertion still gets rejected if the source text
+    it's quoting -- the "source content" half -- matches."""
+    subject_id = _persist_subject(session, strategy_id)
+    text = "The court severed the murder charges from the CSC and kidnapping charges."
+    text_path = tmp_path / "unsafe_source.txt"
+    text_path.write_text(text, encoding="utf-8")
+    source = _make_source(session, subject_id, tmp_path, text_path=str(text_path))
+    provider = _FakeProvider(
+        [
+            _valid_candidate(
+                assertion="The court severed the charges.",
+                quoted_span="severed the murder charges from the CSC and kidnapping charges",
+            )
+        ]
+    )
+
+    result = await extract_claims_for_source(session, source, provider)
+
+    assert result.claims == []
+    assert result.rejected[0].reason == "content_safety_rejected"
+
+
+async def test_content_safety_rejection_is_logged(
+    session: Session, strategy_id: int, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    subject_id = _persist_subject(session, strategy_id)
+    source = _make_source(session, subject_id, tmp_path)
+    provider = _FakeProvider(
+        [_valid_candidate(assertion="criminal sexual conduct with a minor")]
+    )
+
+    with caplog.at_level(logging.WARNING, logger="packages.domain.content_safety"):
+        await extract_claims_for_source(session, source, provider)
+
+    assert len(caplog.records) == 1
+    assert f"source_id={source.id}" in caplog.records[0].message
+
+
+async def test_content_safety_rejection_does_not_abort_extraction(
+    session: Session, strategy_id: int, tmp_path: Path
+) -> None:
+    """A rejection is not an error -- the rest of the batch still gets
+    processed and persisted, per the task this was built under."""
+    subject_id = _persist_subject(session, strategy_id)
+    source = _make_source(session, subject_id, tmp_path)
+    provider = _FakeProvider(
+        [
+            _valid_candidate(assertion="criminal sexual conduct with a minor"),
+            _valid_candidate(assertion="Andreas Gruber's family lived at the farmstead."),
+        ]
+    )
+
+    result = await extract_claims_for_source(session, source, provider)
+
+    assert len(result.rejected) == 1
+    assert result.rejected[0].reason == "content_safety_rejected"
+    assert len(result.claims) == 1
+    assert result.claims[0].statement == "Andreas Gruber's family lived at the farmstead."
+    assert len(session.exec(select(Claim)).all()) == 1
 
 
 def _persist_subject(session: Session, strategy_id: int) -> int:

@@ -48,6 +48,14 @@ Order, all before any persistence:
    e. Derive confidence mechanically from claim_type, rather than asking
       the model for both independently -- see docs/SCHEMA.md for why
       this pairing is fixed instead of modeled as two free axes.
+   f. Reject if packages.domain.content_safety.check_text() matches
+      either the candidate's assertion or its located quoted_span --
+      this is the "source content" half of that filter (the other
+      half, statement-only, is enforced unconditionally at
+      packages/db/listeners.py's Claim.before_insert, which this check
+      does not replace, it runs in addition to it, earlier). Logged via
+      log_rejection with this source's id and domain. A rejection here
+      is not an error -- extraction continues with the next candidate.
 4. Persist Claim + exactly one ClaimSource per surviving claim.
    dry_run=True runs every step above but skips persistence, returning
    what would have been created.
@@ -70,6 +78,7 @@ from pathlib import Path
 from sqlmodel import Session, select
 
 from packages.db.models import Claim, ClaimSource, Source
+from packages.domain.content_safety import check_text, log_rejection
 from packages.domain.enums import TIER_A_SOURCE_TIERS, ClaimCategory, ClaimConfidence, ClaimType
 from packages.domain.spans import locate_span
 from packages.research.llm_provider import ClaimExtractionProvider, ProposedClaim
@@ -96,7 +105,7 @@ class RejectedClaim:
     assertion: str
     quoted_span: str
     reason: str  # "empty_quote" | "quote_not_found" | "span_too_long" |
-    # "invalid_claim_type" | "invalid_category"
+    # "invalid_claim_type" | "invalid_category" | "content_safety_rejected"
 
 
 @dataclass(frozen=True)
@@ -164,6 +173,29 @@ async def extract_claims_for_source(
                     assertion=candidate.assertion,
                     quoted_span=candidate.quoted_span,
                     reason=outcome,
+                )
+            )
+            continue
+
+        # "source content" half of packages.domain.content_safety's filter
+        # -- checked against both the candidate's own statement and the
+        # real, located source text backing it, only now that both are
+        # known good (a candidate that failed span-matching above has no
+        # reliable quoted_span to check). Not an error -- rejected and
+        # logged, extraction continues with the next candidate.
+        safety_match = check_text(candidate.assertion) or check_text(outcome.quoted_span)
+        if safety_match is not None:
+            log_rejection(
+                subject_id=source.subject_id,
+                source_label=f"source_id={source_id} ({source.domain})",
+                statement=candidate.assertion,
+                match=safety_match,
+            )
+            rejected.append(
+                RejectedClaim(
+                    assertion=candidate.assertion,
+                    quoted_span=candidate.quoted_span,
+                    reason="content_safety_rejected",
                 )
             )
             continue
