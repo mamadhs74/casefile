@@ -11,11 +11,8 @@ free of any packages.db dependency, same reasoning every other
 provider module in this codebase already follows (ClaimForComposition,
 ClaimForTagging, etc.). The caller is responsible for resolving that
 path off the episode's own strategy at upload time (Strategy.
-credentials_path -- NOT YET A REAL COLUMN as of this module's writing,
-see the task this was built under; this module is written against the
-schema that column will add, not against what exists in
-data/casefile.db today). Each strategy/channel gets its own token
-file; nothing here reads a shared global credential.
+credentials_path). Each strategy/channel gets its own token file;
+nothing here reads a shared global credential.
 
 OAuth SETUP IS OUT OF SCOPE HERE ON PURPOSE. This module loads and
 refreshes an already-issued token; it never runs the interactive
@@ -28,18 +25,17 @@ was built under), independent of the 10,000-unit default quota
 CLAUDE.md's Platform notes describe for everything else. No quota-
 tracking logic exists in this module, deliberately.
 
-KNOWN GAP, flagged rather than guessed: R5 (CLAUDE.md) requires every
-upload to set YouTube's altered/synthetic content disclosure and
-complete self-certification conservatively. The exact Data API v3
-request field(s) for both are NOT filled in below -- this surface has
-changed more than once, and CLAUDE.md's own Platform-notes convention
-is "verify current numbers in the console, do not hardcode
-assumptions." Confirm the current field(s) against
-https://developers.google.com/youtube/v3/docs/videos/insert before
-this module uploads to a real channel; until then, upload() sends a
-private, correctly-titled/described video WITHOUT that disclosure set,
-which is not R5-compliant on its own. See _SYNTHETIC_DISCLOSURE_TODO
-below for exactly where it needs to go.
+R5 (CLAUDE.md): every upload sets YouTube's altered/synthetic content
+disclosure. status.containsSyntheticMedia (added October 30, 2024,
+settable on videos.insert/videos.update) is that field -- confirmed,
+not guessed. Hardcoded True below, not a parameter on UploadRequest,
+same posture as PRIVACY_STATUS: this pipeline always uses synthetic
+narration and imagery, so the disclosure is never conditional, and a
+caller cannot accidentally upload without it. Self-certification
+(R5's other half) has no equivalent API field as of this writing --
+that stays a manual step in Studio, same as R5's own "completes
+self-certification conservatively" already assumed a human in the
+loop for.
 """
 
 from __future__ import annotations
@@ -69,13 +65,11 @@ _CHUNK_SIZE = -1
 # UploadRequest on purpose: a caller cannot accidentally request public.
 PRIVACY_STATUS = "private"
 
-# See module docstring's "KNOWN GAP" paragraph. This constant exists so
-# the one line that needs to change, once the real field is confirmed,
-# is obvious and greppable -- not scattered reasoning in a comment.
-_SYNTHETIC_DISCLOSURE_TODO = (
-    "R5 synthetic-content disclosure field not yet confirmed against "
-    "the live YouTube Data API v3 docs -- see module docstring"
-)
+# Always True -- see module docstring's R5 paragraph. Not a parameter on
+# UploadRequest, same reasoning as PRIVACY_STATUS: every video this
+# pipeline produces uses synthetic narration and imagery, so this is
+# never conditional on the caller remembering to set it.
+CONTAINS_SYNTHETIC_MEDIA = True
 
 
 @dataclass(frozen=True)
@@ -135,9 +129,7 @@ class YouTubeUploader:
             },
             "status": {
                 "privacyStatus": PRIVACY_STATUS,
-                # TODO(_SYNTHETIC_DISCLOSURE_TODO): the R5 altered/
-                # synthetic-content disclosure field belongs here. Not
-                # added -- see module docstring's KNOWN GAP paragraph.
+                "containsSyntheticMedia": CONTAINS_SYNTHETIC_MEDIA,
             },
         }
 

@@ -98,6 +98,15 @@ class Strategy(TimestampedModel, table=True):
     treated differently). There is deliberately no general-purpose update
     endpoint for these fields: they come from a migration/seed, not a live
     admin surface, so weakening R1 requires a code change someone reviews.
+
+    credentials_path -- the absolute path to this strategy's YouTube OAuth
+    token file (packages/publish/youtube.py), one per strategy/channel,
+    never a shared global credential -- see docs/YOUTUBE_SETUP.md. Nullable:
+    a strategy with no channel set up yet (criminal-cases, as of this
+    column's addition) legitimately has none. The file itself is never
+    committed or stored in this database -- only its path, same "credentials
+    never live in the database" posture docs/SCHEMA.md's Channel section
+    already documents for credentials_ref.
     """
 
     __tablename__ = "strategy"
@@ -115,6 +124,7 @@ class Strategy(TimestampedModel, table=True):
         default_factory=list, sa_column=Column(SAJSON)
     )
     is_active: bool = Field(default=True)
+    credentials_path: str | None = Field(default=None)
 
 
 class Subject(TimestampedModel, table=True):

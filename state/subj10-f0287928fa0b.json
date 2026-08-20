@@ -1,0 +1,33 @@
+{
+  "run_id": "subj10-f0287928fa0b",
+  "subject_id": 10,
+  "thesis": "The Paramount-Warner Bros. merger cleared every regulator that could stop it, and the only thing left standing in its way is a lawsuit that hasn't been filed yet.",
+  "episode_id": null,
+  "stages": {
+    "create_episode": {
+      "status": "failed",
+      "error": "SetupAborted('refusing to run: subject 10 already has episode id=1 -- not creating a second one without --dry-run')",
+      "completed_at": null
+    },
+    "tag_sections": {
+      "status": "pending",
+      "error": null,
+      "completed_at": null
+    },
+    "compose_episode": {
+      "status": "pending",
+      "error": null,
+      "completed_at": null
+    },
+    "render_episode": {
+      "status": "pending",
+      "error": null,
+      "completed_at": null
+    },
+    "upload": {
+      "status": "pending",
+      "error": null,
+      "completed_at": null
+    }
+  }
+}

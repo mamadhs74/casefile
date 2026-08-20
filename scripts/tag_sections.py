@@ -65,12 +65,43 @@ def _report_diff(grouped: dict[int, list[Claim]], tags: dict[int, dict[int, str 
     print(f"{total - mismatches}/{total} match, {mismatches} mismatch(es)")
 
 
+async def run_tag_sections(subject_id: int, api_key: str) -> int:
+    """Importable entry point for a real (write-mode) tagging run --
+    scripts/run_episode.py (Task 4) calls this directly instead of
+    shelling out to main(). Returns the number of claims changed.
+    Raises on failure (no retry); caller decides how to report/record
+    that."""
+    provider = GeminiSectionTaggingProvider(api_key)
+    cache_path = CACHE_DIR / f"subject_{subject_id}.json"
+    print(f"cache: {cache_path}")
+
+    with get_session() as session:
+        grouped = claims_by_source(session, subject_id)
+        total_claims = sum(len(c) for c in grouped.values())
+        print(f"subject {subject_id}: {len(grouped)} source(s), {total_claims} claim(s)")
+
+        tags = await compute_subject_tags(grouped, provider, cache_path)
+
+        changed = apply_tags_to_db(session, grouped, tags)
+        session.commit()
+        print(f"committed: {changed} claim(s) changed")
+        return changed
+
+
 async def _run(subject_id: int, verify: bool) -> int:
     load_dotenv()
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         print("GEMINI_API_KEY is not set (see .env.example).", file=sys.stderr)
         return 1
+
+    if not verify:
+        try:
+            await run_tag_sections(subject_id, api_key)
+        except Exception as exc:  # noqa: BLE001  -- report and stop, no retry, see module docstring
+            print(f"tagging failed, stopping (no retry): {exc!r}", file=sys.stderr)
+            return 1
+        return 0
 
     provider = GeminiSectionTaggingProvider(api_key)
     cache_path = CACHE_DIR / f"subject_{subject_id}.json"
@@ -87,15 +118,9 @@ async def _run(subject_id: int, verify: bool) -> int:
             print(f"tagging failed, stopping (no retry): {exc!r}", file=sys.stderr)
             return 1
 
-        if verify:
-            _report_diff(grouped, tags)
-            print()
-            print("VERIFY MODE -- nothing written to data/casefile.db.")
-            return 0
-
-        changed = apply_tags_to_db(session, grouped, tags)
-        session.commit()
-        print(f"committed: {changed} claim(s) changed")
+        _report_diff(grouped, tags)
+        print()
+        print("VERIFY MODE -- nothing written to data/casefile.db.")
     return 0
 
 

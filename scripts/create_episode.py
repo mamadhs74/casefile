@@ -224,7 +224,19 @@ def _report_allocation(
     print(f"  derived_runtime_minutes: {allocated.derived_runtime_minutes}")
 
 
-def _run(subject_id: int, thesis: str, dry_run: bool) -> int:
+def create_episode_for_subject(subject_id: int, thesis: str) -> int:
+    """Importable entry point for a real (non-dry-run) episode
+    creation -- scripts/run_episode.py (Task 4) calls this directly
+    instead of shelling out to main(). Returns the new episode_id.
+    Raises SetupAborted on any failure (episode already exists, no
+    RESOLUTION-tagged source, VariationProfile/SubtitleStyle missing,
+    etc.) -- no retry, caller decides how to report/record that."""
+    episode_id = _run(subject_id, thesis, dry_run=False)
+    assert episode_id is not None  # dry_run=False always returns a real id or raises
+    return episode_id
+
+
+def _run(subject_id: int, thesis: str, dry_run: bool) -> int | None:
     with get_session() as session:
         if not dry_run:
             _require_backup()
@@ -271,13 +283,14 @@ def _run(subject_id: int, thesis: str, dry_run: bool) -> int:
             session.rollback()
             print()
             print("DRY RUN -- nothing written, session rolled back.")
+            return None
         else:
             _check_foreign_keys(session, "pre-commit")
             session.commit()
             _check_foreign_keys(session, "post-commit")
             print()
             print(f"COMMITTED -- episode_id={episode.id}")
-    return 0
+            return episode.id
 
 
 def _parse_args() -> argparse.Namespace:
@@ -291,10 +304,11 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     try:
-        return _run(args.subject_id, args.thesis, args.dry_run)
+        _run(args.subject_id, args.thesis, args.dry_run)
     except SetupAborted as exc:
         print(f"ABORTED: {exc}", file=sys.stderr)
         return 1
+    return 0
 
 
 if __name__ == "__main__":
