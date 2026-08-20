@@ -4,30 +4,35 @@
   "thesis": "The Paramount-Warner Bros. merger cleared every regulator that could stop it, and the only thing left standing in its way is a lawsuit that hasn't been filed yet.",
   "episode_id": null,
   "stages": {
+    "tag_sections": {
+      "status": "completed",
+      "error": null,
+      "completed_at": "2026-08-20T00:34:43.313516+00:00",
+      "note": "skipped -- subject already had at least one section-tagged claim"
+    },
     "create_episode": {
       "status": "failed",
       "error": "SetupAborted('refusing to run: subject 10 already has episode id=1 -- not creating a second one without --dry-run')",
-      "completed_at": null
-    },
-    "tag_sections": {
-      "status": "pending",
-      "error": null,
-      "completed_at": null
+      "completed_at": null,
+      "note": null
     },
     "compose_episode": {
       "status": "pending",
       "error": null,
-      "completed_at": null
+      "completed_at": null,
+      "note": null
     },
     "render_episode": {
       "status": "pending",
       "error": null,
-      "completed_at": null
+      "completed_at": null,
+      "note": null
     },
     "upload": {
       "status": "pending",
       "error": null,
-      "completed_at": null
+      "completed_at": null,
+      "note": null
     }
   }
 }

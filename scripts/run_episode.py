@@ -1,9 +1,27 @@
-"""Single entry point: create_episode -> tag_sections -> compose_episode
+"""Single entry point: tag_sections -> create_episode -> compose_episode
 -> render_episode -> upload, chained. Each stage is one of this
 project's already-built, independently-runnable scripts, called as a
-function (not shelled out to) -- scripts/create_episode.py,
-scripts/tag_sections.py, scripts/compose_episode.py,
+function (not shelled out to) -- scripts/tag_sections.py,
+scripts/create_episode.py, scripts/compose_episode.py,
 scripts/render_episode.py, packages/publish/youtube.py.
+
+ORDER, and why it's tag_sections first: create_episode's pool
+derivation (scripts/create_episode.py) requires at least one of the
+subject's sources to already have a claim tagged Section.RESOLUTION --
+that's what "qualifying source" means there. Running create_episode
+before the stage that produces those tags meant the chain could only
+ever work for a subject someone had already hand-tagged beforehand,
+which defeats the point of an automated entry point. tag_sections first
+fixes that structurally, not by reordering around a workaround.
+
+TAG_SECTIONS SKIP GUARD: if --subject-id already has at least one claim
+with a non-NULL section (subject 10's hand tags, or a prior real run's
+output), this stage is skipped entirely -- zero Gemini calls -- and
+recorded "completed" with a note explaining why, rather than re-tagging
+claims a human (or an earlier run) already reviewed. This is what makes
+the stage idempotent across re-runs and is why it's safe to always put
+tag_sections first: it will never re-tag an already-tagged subject, it
+only ever tags a genuinely untagged one.
 
 RUN ID: derived deterministically from (subject_id, thesis) -- a short
 hash of the thesis text, prefixed with the subject id -- not a separate
@@ -16,16 +34,17 @@ same case are expected to produce different Episodes" reasoning) and
 gets its own run_id and its own outputs/state files.
 
 STATE: state/<run_id>.json. Each of the five stages records "completed"
-(with a timestamp) or "failed" (with the exception's repr) -- nothing
-else. On startup, the state file is loaded (or created fresh if this
-run_id has never run) and every stage already marked "completed" is
-skipped outright -- not re-verified, not re-run. The run resumes at the
-first stage that is not yet "completed" (pending, or previously
-failed). NO STAGE IS EVER RETRIED AUTOMATICALLY: a failure marks that
-stage "failed" in the state file and this script exits immediately.
-Re-running the same --subject-id/--thesis afterward is what retries a
-failed stage -- a deliberate human decision to try again, not a loop
-this script runs on its own.
+(with a timestamp and, for a skipped tag_sections, a note) or "failed"
+(with the exception's repr) -- nothing else. On startup, the state file
+is loaded (or created fresh if this run_id has never run) and every
+stage already marked "completed" is skipped outright -- not
+re-verified, not re-run. The run resumes at the first stage that is not
+yet "completed" (pending, or previously failed). NO STAGE IS EVER
+RETRIED AUTOMATICALLY: a failure marks that stage "failed" in the state
+file and this script exits immediately. Re-running the same
+--subject-id/--thesis afterward is what retries a failed stage -- a
+deliberate human decision to try again, not a loop this script runs on
+its own.
 
 OUTPUTS: outputs/<run_id>/, containing composed_script.json (written by
 the compose_episode stage), the narration wavs and final.mp4 (written
@@ -41,24 +60,7 @@ collides on output files).
 
 --stop-after <stage>: run up to and including that stage, then exit 0
 without attempting the next one. Choices are exactly the five stage
-names.
-
-KNOWN ORDERING DEPENDENCY, not fixed here: create_episode's pool
-derivation (scripts/create_episode.py) requires at least one of the
-subject's sources to already have a claim tagged Section.RESOLUTION --
-that's what "qualifying source" means there. For subject 10, this
-already held (this session's own hand-tagging, since corrected and
-re-verified) before this pipeline ever ran end to end, so the chain
-create_episode -> tag_sections -> ... worked in the order given. For a
-genuinely fresh, never-tagged subject, the create_episode stage will
-fail immediately (SetupAborted: "no source with a RESOLUTION-tagged
-claim") specifically because tag_sections hasn't run yet to produce
-that tag -- tag_sections is stage 2, after create_episode, per the
-task this was built under. The practical workaround today, for a new
-subject, is running `scripts.tag_sections --subject-id <id>` (write
-mode) once, by hand, before the first scripts.run_episode run against
-it. Not reordered here since the stage order was given explicitly, not
-inferred -- flagging it rather than silently working around it.
+names, in the order above.
 
 Usage:
     uv run python -m scripts.run_episode --subject-id 10 --thesis "..."
@@ -79,8 +81,9 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+from sqlmodel import Session, col, select
 
-from packages.db.models import Episode, Strategy, Subject
+from packages.db.models import Claim, Episode, Strategy, Subject
 from packages.db.session import get_session
 from packages.publish.templates import PublishMetadataInput, get_publish_template
 from packages.publish.youtube import UploadRequest, YouTubeUploader
@@ -92,7 +95,9 @@ from scripts.tag_sections import run_tag_sections
 STATE_DIR = Path("state")
 OUTPUTS_DIR = Path("outputs")
 
-STAGE_ORDER = ["create_episode", "tag_sections", "compose_episode", "render_episode", "upload"]
+STAGE_ORDER = ["tag_sections", "create_episode", "compose_episode", "render_episode", "upload"]
+
+_ALREADY_TAGGED_NOTE = "skipped -- subject already had at least one section-tagged claim"
 
 
 class MissingCredentialsPathError(Exception):
@@ -129,7 +134,7 @@ def _load_state(run_id: str, subject_id: int, thesis: str) -> dict[str, Any]:
         "thesis": thesis,
         "episode_id": None,
         "stages": {
-            name: {"status": "pending", "error": None, "completed_at": None}
+            name: {"status": "pending", "error": None, "completed_at": None, "note": None}
             for name in STAGE_ORDER
         },
     }
@@ -145,11 +150,12 @@ def _is_completed(state: dict[str, Any], name: str) -> bool:
     return status == "completed"
 
 
-def _mark_completed(state: dict[str, Any], name: str) -> None:
+def _mark_completed(state: dict[str, Any], name: str, *, note: str | None = None) -> None:
     state["stages"][name] = {
         "status": "completed",
         "error": None,
         "completed_at": datetime.now(UTC).isoformat(),
+        "note": note,
     }
     _save_state(state)
 
@@ -159,18 +165,40 @@ def _mark_failed(state: dict[str, Any], name: str, exc: BaseException) -> None:
         "status": "failed",
         "error": repr(exc),
         "completed_at": None,
+        "note": None,
     }
     _save_state(state)
 
 
-async def _run_stage(state: dict[str, Any], name: str, fn: Callable[[], Awaitable[None]]) -> None:
+def _subject_has_any_section_tag(session: Session, subject_id: int) -> bool:
+    query = (
+        select(Claim.id)
+        .where(Claim.subject_id == subject_id, col(Claim.section).is_not(None))
+        .limit(1)
+    )
+    return session.exec(query).first() is not None
+
+
+async def _run_stage(
+    state: dict[str, Any],
+    name: str,
+    fn: Callable[[], Awaitable[None]],
+    *,
+    skip_if: Callable[[], bool] | None = None,
+    skip_note: str | None = None,
+) -> None:
     """Runs stage `name` via `fn()` unless the state file already marks
-    it "completed", in which case it's skipped outright. On failure,
-    records "failed" (with the exception's repr) and re-raises -- the
-    caller stops the whole run; there is no retry anywhere in this
-    function."""
+    it "completed" (skipped outright, no re-check), or `skip_if()`
+    returns True (skipped, but recorded "completed" with `skip_note` --
+    see tag_sections' guard in _run below). On failure, records
+    "failed" (with the exception's repr) and re-raises -- the caller
+    stops the whole run; there is no retry anywhere in this function."""
     if _is_completed(state, name):
         print(f"[{name}] already completed, skipping")
+        return
+    if skip_if is not None and skip_if():
+        print(f"[{name}] skip guard satisfied, skipping ({skip_note})")
+        _mark_completed(state, name, note=skip_note)
         return
     print(f"[{name}] running...")
     try:
@@ -232,12 +260,16 @@ async def _run(subject_id: int, thesis: str, stop_after: str | None) -> int:
         print("GEMINI_API_KEY is not set (see .env.example).", file=sys.stderr)
         return 1
 
-    async def _create_episode_stage() -> None:
-        episode_id = create_episode_for_subject(subject_id, thesis)
-        state["episode_id"] = episode_id
+    def _tag_sections_skip_guard() -> bool:
+        with get_session() as session:
+            return _subject_has_any_section_tag(session, subject_id)
 
     async def _tag_sections_stage() -> None:
         await run_tag_sections(subject_id, api_key)
+
+    async def _create_episode_stage() -> None:
+        episode_id = create_episode_for_subject(subject_id, thesis)
+        state["episode_id"] = episode_id
 
     async def _compose_stage() -> None:
         assert state["episode_id"] is not None
@@ -251,17 +283,19 @@ async def _run(subject_id: int, thesis: str, stop_after: str | None) -> int:
         assert state["episode_id"] is not None
         _do_upload(state["episode_id"], output_dir)
 
-    stages: list[tuple[str, Callable[[], Awaitable[None]]]] = [
-        ("create_episode", _create_episode_stage),
-        ("tag_sections", _tag_sections_stage),
-        ("compose_episode", _compose_stage),
-        ("render_episode", _render_stage),
-        ("upload", _upload_stage),
+    stages: list[
+        tuple[str, Callable[[], Awaitable[None]], Callable[[], bool] | None, str | None]
+    ] = [
+        ("tag_sections", _tag_sections_stage, _tag_sections_skip_guard, _ALREADY_TAGGED_NOTE),
+        ("create_episode", _create_episode_stage, None, None),
+        ("compose_episode", _compose_stage, None, None),
+        ("render_episode", _render_stage, None, None),
+        ("upload", _upload_stage, None, None),
     ]
 
     try:
-        for name, fn in stages:
-            await _run_stage(state, name, fn)
+        for name, fn, skip_if, skip_note in stages:
+            await _run_stage(state, name, fn, skip_if=skip_if, skip_note=skip_note)
             if stop_after == name:
                 print(f"--stop-after {name}: stopping")
                 return 0
