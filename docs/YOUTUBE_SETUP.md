@@ -70,30 +70,28 @@ writes a token JSON to disk. This is not something to run inside an agent
 session — do it yourself, in a terminal, so the browser consent step is
 actually yours.
 
-Reference implementation (the standard pattern for this library — write this
-as a throwaway local script, not part of `packages/`, since it's a one-time
-setup action, not a pipeline component):
-
-```python
-from google_auth_oauthlib.flow import InstalledAppFlow
-
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
-
-flow = InstalledAppFlow.from_client_secrets_file(
-    "client_secret_film_tv_news.json",  # the file from step 4
-    SCOPES,
-)
-credentials = flow.run_local_server(port=0)
-
-with open("film_tv_news_youtube_token.json", "w") as f:
-    f.write(credentials.to_json())
+```
+uv run python -m scripts.generate_youtube_token
 ```
 
-Run it once per strategy, with that strategy's client secret file and its own
-output token path. The resulting token file is what `Strategy.credentials_path`
-should point at — keep it out of the repo (it's a real credential, same
-posture as every other secret CLAUDE.md's conventions cover: never committed,
-never logged).
+`scripts/generate_youtube_token.py` is this section's flow, with real paths
+hardcoded for film-tv-news's channel instead of placeholder filenames:
+`credentials/film-tv-news/client_secret.json` in, `credentials/film-tv-news/token.json`
+out. It refuses to run if the client secret is missing, or if `token.json`
+already exists (won't silently overwrite a working token — it prints the
+`rm` command to run first if you actually want a new one). Never prints
+either file's contents; prints only the output path on success.
+
+A second strategy's channel needs its own run of this same shape — either
+edit the two hardcoded paths and rerun, or copy the script under a new name
+per strategy. It's a one-off setup action, not a reusable multi-strategy
+tool, the same way each strategy gets its own Google Cloud project and its
+own client secret above.
+
+The resulting token file is what `Strategy.credentials_path` should point
+at — keep it out of the repo (it's a real credential, same posture as every
+other secret CLAUDE.md's conventions cover: never committed, never logged).
+`credentials/` is gitignored for exactly this reason.
 
 ## 7. Point `Strategy.credentials_path` at the token file
 
