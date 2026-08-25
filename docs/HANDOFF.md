@@ -484,6 +484,22 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
     nothing in them to tag, not because they weren't reviewed. Composition not yet run
     against subject 10.
 
+44. **`Strategy.credentials_path` (added this session for YouTube upload,
+    `packages/publish/youtube.py`) is single-platform by construction, not a design
+    that happens to only have one value populated yet.** It's one nullable `str` column
+    on `Strategy` — one credentials file per strategy, full stop. That's already a
+    simplification worth naming now, before TikTok and Meta accounts exist to expose it:
+    a strategy's *channels* are the things that actually hold platform credentials
+    (`docs/SCHEMA.md`'s `Channel` table already models `platform` + one row per
+    account), and a single strategy will have a YouTube channel, a TikTok channel, and
+    an Instagram/Facebook presence, each needing its own OAuth token. The right home for
+    multi-platform credentials is `Channel.credentials_path` (strategy, platform,
+    credentials_path), not a second, third, fourth column bolted onto `Strategy`. Not a
+    change to make now — YouTube is the only platform with working upload code, and
+    `Strategy.credentials_path` is correct for exactly that single-platform case — but
+    the moment a second platform's uploader gets built, `credentials_path` needs to move
+    off `Strategy` and onto `Channel`, not grow a second column next to it.
+
 ---
 
 ## 8. Entity extraction: validated
