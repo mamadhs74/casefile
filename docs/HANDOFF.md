@@ -500,6 +500,17 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
     the moment a second platform's uploader gets built, `credentials_path` needs to move
     off `Strategy` and onto `Channel`, not grow a second column next to it.
 
+45. **`credentials/film-tv-news/client_secret.json` was committed in `a4fb4ae` (swept in
+    by an unrelated commit's `git add -A`), untracked in a later commit, but `a4fb4ae`
+    itself was still pushed to `origin/main` as an ancestor of a subsequent push — the
+    untrack didn't remove the earlier commit's blob from history, and nothing caught
+    that before the push ran. The leaked client secret has since been rotated in Google
+    Cloud Console; the version that reached `origin/main` is dead and unusable. History
+    was deliberately not rewritten (no `filter-repo`, no force-push) — the exposure is
+    accepted as already having happened rather than disrupting shared history to hide a
+    secret that no longer works anyway. `credentials/` is gitignored going forward, so
+    this shouldn't recur for this or any other strategy's client secret or token file.
+
 ---
 
 ## 8. Entity extraction: validated
