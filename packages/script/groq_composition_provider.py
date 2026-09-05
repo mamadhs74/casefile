@@ -128,6 +128,24 @@ Order claims within the section in the order given -- do not reorder
 them. Output plain prose only: no headings, no claim IDs, no markdown,
 no bullet points.
 
+Write in full sentences, with normal articles ("a," "an," "the") and
+connectives -- do not compress toward headline style, do not fuse
+clauses with semicolons in place of separate sentences, do not drop
+articles to save words. This is documentary narration meant to be
+read aloud, not a wire-service summary or a list of fragments -- match
+the plain, factual, sentence-by-sentence register already specified
+above, the same register Gemini's output already produces for this
+same pipeline.
+
+Never attribute a claim to a source the claim does not name. Do not
+write "sources reported", "industry sources", "according to filings"
+or any similar attribution unless the claim's own statement names that
+source. A claim stated as plain fact must be narrated as plain fact.
+
+When paraphrasing the thesis, do not alter its factual content. If the
+thesis says a lawsuit has not been filed, do not render this as
+unwritten, undrafted, or anything other than not filed.
+
 Respond with a single JSON object of the exact shape {"text": "<the
 composed prose>"} and nothing else -- no surrounding markdown, no code
 fence.
@@ -249,18 +267,21 @@ def _build_claims_block(claims: list[ClaimForComposition]) -> str:
         date_part = f", date_anchor={c.date_anchor}" if c.date_anchor else ""
         lines.append(
             f'- claim_type={c.claim_type}, confidence={c.confidence}, '
-            f'thesis_bearing={c.thesis_bearing}, word_target={c.word_target}'
+            f'thesis_bearing={c.thesis_bearing}'
             f'{date_part}: "{c.statement}"'
         )
     return "\n".join(lines)
 
 
 def _build_contents(claims: list[ClaimForComposition], thesis: str, word_budget: int) -> str:
-    return (
-        f"Episode thesis: {thesis}\n\n"
-        f"Target word count for this section: {word_budget}\n\n"
-        f"{_build_claims_block(claims)}"
-    )
+    # word_budget is intentionally unused here -- see the task this was
+    # built under: the section-level target stops being sent to the
+    # model at all, but the parameter stays (caller, and this
+    # function's own signature, are unchanged) so compose_section()'s
+    # interface and chronological_composition.py's call site don't
+    # need to change.
+    del word_budget
+    return f"Episode thesis: {thesis}\n\n{_build_claims_block(claims)}"
 
 
 def _is_truncated(response: _GroqChatResponse) -> bool:
