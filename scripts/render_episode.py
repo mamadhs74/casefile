@@ -117,9 +117,41 @@ def _load_sections(composed_script_path: Path) -> list[tuple[str, str]]:
     ]
 
 
+# Georgia.ttf (FONT_BODY, packages/visual/cards.py) doesn't have glyphs
+# for every typographic punctuation mark composed text contains --
+# missing glyphs render as boxes. Curly quotes, non-breaking hyphens,
+# and en/em dashes to their ASCII equivalents, translated right before
+# a card is built.
+_UNICODE_TO_ASCII = str.maketrans(
+    {
+        "‘": "'",  # LEFT SINGLE QUOTATION MARK
+        "’": "'",  # RIGHT SINGLE QUOTATION MARK
+        "“": '"',  # LEFT DOUBLE QUOTATION MARK
+        "”": '"',  # RIGHT DOUBLE QUOTATION MARK
+        "‐": "-",  # HYPHEN
+        "‑": "-",  # NON-BREAKING HYPHEN
+        "–": "-",  # EN DASH
+        "—": "--",  # EM DASH
+        "―": "--",  # HORIZONTAL BAR
+    }
+)
+
+
+def _normalize_for_render(text: str) -> str:
+    """Applied at render time only, in memory, right before a card is
+    built -- composed_script.json on disk is never touched, so this is
+    always safe to re-run and the original composed text (with its
+    real typography) stays intact as the source of truth."""
+    return text.translate(_UNICODE_TO_ASCII)
+
+
 def _build_cards(sections: list[tuple[str, str]]) -> list[PlannedCard]:
     return [
-        PlannedCard(kind="statement", claim_id=None, spec=StatementCardSpec(statement=text))
+        PlannedCard(
+            kind="statement",
+            claim_id=None,
+            spec=StatementCardSpec(statement=_normalize_for_render(text)),
+        )
         for _name, text in sections
     ]
 
