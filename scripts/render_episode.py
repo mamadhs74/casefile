@@ -1,8 +1,15 @@
 """Render the section-level card binding for any real Episode -- one
-card per SECTION (Ground, Sequence, Resolution), not one per claim and
-not one per composed sentence. Generalizes scripts/render_episode1.py
-(kept, not deleted, per the task this was built under) to take
---episode-id instead of being pinned to episode 1.
+card per SECTION (Cold Open, Thesis, Ground, Sequence, Resolution,
+Return, in that narrative order), not one per claim and not one per
+composed sentence. Generalizes scripts/render_episode1.py (kept, not
+deleted, per the task this was built under) to take --episode-id
+instead of being pinned to episode 1.
+
+Previously only Ground/Sequence/Resolution were rendered -- Cold Open,
+Thesis, and Return existed in composed_script.json but _load_sections
+never read them, with no comment explaining the omission. Fixed to
+cover all six SectionedScript fields, per the task this was built
+under.
 
 SECTION TEXT SOURCE: outputs/<episode_id>/composed_script.json,
 written by scripts/compose_episode.py on a full successful composition
@@ -13,10 +20,11 @@ fails loudly (MissingComposedScriptError) if that file doesn't exist,
 rather than silently rendering placeholder text as if it were real.
 
 Card binding is coarser than either of the two original scratch
-scripts: one PlannedCard per SECTION here, versus one per claim
-(render_scratch_visual.py, untouched by this script -- still pinned to
-subject 8) or one per composed sentence (compose_scratch_borden.py).
-Each section's full text is synthesized as exactly ONE Kokoro clip;
+scripts: one PlannedCard per SECTION here (six per episode now, not
+three), versus one per claim (render_scratch_visual.py, untouched by
+this script -- still pinned to subject 8) or one per composed sentence
+(compose_scratch_borden.py). Each section's full text is synthesized
+as exactly ONE Kokoro clip;
 that clip's measured (ffprobe) duration becomes that card's on-screen
 duration directly. There is no separate "proportional" calculation to
 write -- the measured duration of a section's own audio already *is*
@@ -32,7 +40,7 @@ Scope, deliberately untouched (see the task this was built under):
 - packages/db/models.py -- no changes here (a real column was added
   elsewhere this session, but not by this script).
 - ScriptCitation -- no span offsets added; this script has no citation
-  concept at all, it renders three fixed text blocks, not claims.
+  concept at all, it renders six fixed text blocks, not claims.
 - No Gemini calls -- composition is a separate, earlier stage
   (scripts/compose_episode.py).
 
@@ -90,16 +98,22 @@ class MissingComposedScriptError(Exception):
 def _load_sections(composed_script_path: Path) -> list[tuple[str, str]]:
     """composed_script.json is only ever written by
     scripts/compose_episode.py's _write_output, and only on a fully
-    successful compose_episode run -- so its presence implies all three
-    fields below are populated; no partial-file handling here."""
+    successful compose_episode run -- so its presence implies all six
+    fields below are populated; no partial-file handling here. All six
+    SectionedScript fields, in narrative order -- previously only
+    ground/sequence/resolution were read, with Cold Open, Thesis, and
+    Return silently dropped; see module docstring."""
     if not composed_script_path.exists():
         raise MissingComposedScriptError(composed_script_path)
     payload = json.loads(composed_script_path.read_text())
     print(f"section text source: {composed_script_path} (real composed text)")
     return [
+        ("Cold Open", payload["cold_open"]),
+        ("Thesis", payload["thesis"]),
         ("Ground", payload["ground"]),
         ("Sequence", payload["sequence"]),
         ("Resolution", payload["resolution"]),
+        ("Return", payload["return_"]),
     ]
 
 
