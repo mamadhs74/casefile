@@ -511,6 +511,24 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
     secret that no longer works anyway. `credentials/` is gitignored going forward, so
     this shouldn't recur for this or any other strategy's client secret or token file.
 
+46. **YouTube OAuth setup needed three separate fixes before `scripts/generate_youtube_token.py`
+    could produce a working token, none of them visible from the code alone.** The Google Cloud
+    OAuth consent screen had zero scopes registered under Data Access —
+    `https://www.googleapis.com/auth/youtube.upload` had to be added there by hand before consent
+    could ask for it at all. The app was also left in production mode, which requires Google's own
+    verification process for sensitive scopes; switched to testing mode instead, with
+    `mamadhs74@gmail.com` registered as the sole test user — testing-mode refresh tokens expire
+    after 7 days, so `token.json` needs regenerating roughly weekly until (if ever) the app goes
+    through verification. Running `generate_youtube_token.py` from a normal, multi-account Chrome
+    session sends `authuser=0` on the consent URL, which silently authorizes whichever account is
+    first in that browser session rather than the intended one, and fails as a bare 400 with no
+    error parameter in the URL to explain why — the fix is running the whole consent flow, and
+    creating the YouTube channel itself, from an incognito window signed into exactly the target
+    account. The `401 youtubeSignupRequired` failures hit earlier were this same problem one layer
+    downstream: the account behind the token had no YouTube channel yet, not a bad or expired
+    token. Episode 1 uploaded successfully once all three were fixed: video id `oXuKZpH1IME`,
+    private, synthetic-media disclosure set, per R5.
+
 ---
 
 ## 8. Entity extraction: validated
