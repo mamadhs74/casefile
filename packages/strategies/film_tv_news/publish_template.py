@@ -15,14 +15,16 @@ from packages.publish.templates import (
 
 _MAX_TITLE_CHARS = 100  # YouTube's own title limit
 
-# R5 (CLAUDE.md): every upload discloses synthetic narration/imagery.
-# This line is the human-readable half of that disclosure (the
-# description text); the machine-readable half (the API's own
-# altered/synthetic-content flag) is a known gap in
-# packages/publish/youtube.py -- see that module's docstring. Both are
-# required; neither one substitutes for the other.
+# R5 (CLAUDE.md): every upload discloses synthetic narration. This
+# line is the human-readable half of that disclosure (the description
+# text); the machine-readable half (the API's own altered/synthetic-
+# content flag) is a known gap in packages/publish/youtube.py -- see
+# that module's docstring. Both are required; neither one substitutes
+# for the other. No mention of imagery -- render_episode.py produces
+# text cards only, no generated imagery exists in the render path yet
+# (see docs/HANDOFF.md sec 6 -- claim-to-image mapping is unbuilt).
 _DISCLOSURE_LINE = (
-    "This video uses AI-generated narration and imagery, disclosed per "
+    "This video uses AI-generated narration, disclosed per "
     "YouTube's altered/synthetic content policy."
 )
 
