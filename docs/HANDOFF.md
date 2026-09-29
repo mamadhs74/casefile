@@ -585,15 +585,27 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
     but is NOT yet fixed** — it's not a quote/hyphen/dash, so it fell outside that task's stated
     scope.
 
-    **Publish template fixed to stop overclaiming.** `packages/strategies/film_tv_news/
-    publish_template.py`'s disclosure line said "AI-generated narration and imagery" — the render
-    path produces text cards only, no generated imagery exists anywhere in this pipeline yet
-    (§6). Changed to "AI-generated narration." Only affects future uploads; episode 1's live
-    description still has the old wording until finding #46's follow-up sync is done (see that
-    finding's task 1, blocked on a scope gap — `videos.list` 403s under `youtube.upload`-only
-    scope, so there's no safe way to read back the current `categoryId` `videos.update` requires
-    resending; re-auth with the broader `youtube` scope was chosen as the fix, pending a fresh
-    incognito consent run).
+    **Publish template fixed to stop overclaiming, and episode 1's live description is now
+    synced to match.** `packages/strategies/film_tv_news/publish_template.py`'s disclosure line
+    said "AI-generated narration and imagery" — the render path produces text cards only, no
+    generated imagery exists anywhere in this pipeline yet (§6). Changed to "AI-generated
+    narration." This originally only affected future uploads, since fixing it live required
+    `videos.update`, which requires resending `snippet.categoryId`, which in turn requires
+    `videos.list` to read it first — and the `youtube.upload`-only scope on `token.json` 403s on
+    every `videos.list` call regardless of `part`. **Resolved**: `token.json` was regenerated
+    with the full `https://www.googleapis.com/auth/youtube` scope (read and write), which needed
+    that scope registered on the OAuth consent screen's Data Access page first — the same
+    registration pattern finding #46 already hit for `youtube.upload` itself, recurring here for
+    the wider scope. `videos.list` confirmed working afterward, then `videos.update` synced
+    episode 1's live description to the current disclosure line, resending `title`, `tags`, and
+    `categoryId` unchanged (echoed back exactly as read, not touched) and changing only
+    `description`. Confirmed via the update call's own response.
+
+    **Episode 1's `categoryId` is `22` (People & Blogs) — YouTube's own default, not a choice
+    this pipeline made.** `packages/publish/youtube.py`'s upload `body` never sets `categoryId`
+    at all, so every upload gets whatever YouTube defaults to. Whether that should instead be
+    `24` (Entertainment) or `25` (News & Politics) for film-tv-news content is an open decision,
+    not yet made either way.
 
     **Two credential rotations tonight.** Both the Groq and Gemini API keys were accidentally
     pasted into chat during the session; both were rotated in their respective consoles, and
