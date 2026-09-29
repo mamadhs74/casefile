@@ -269,6 +269,102 @@ async def test_empty_quote_is_rejected(
     assert result.rejected[0].reason == "empty_quote"
 
 
+FIGURE_SOURCE_TEXT = (
+    "WBD and Paramount could pull ahead of Disney if they close their "
+    "pending $110 billion merger. The deal, which is in limbo as a "
+    "lawsuit with 12 state attorneys general heads to trial in March "
+    "2027, has received the necessary approvals from regulators."
+)
+
+
+async def test_assertion_figure_not_in_its_own_quote_is_rejected(
+    session: Session, strategy_id: int, tmp_path: Path
+) -> None:
+    """Mirrors a real finding (docs/HANDOFF.md): a claim can locate a
+    real, verbatim span and still smuggle in a number from elsewhere in
+    the source that this specific span never supports. quoted_span here
+    is the trial sentence alone -- it never states $110 billion, even
+    though that figure genuinely appears earlier in the same source, in
+    a different sentence backing a different claim."""
+    subject_id = _persist_subject(session, strategy_id)
+    text_path = tmp_path / "figure_source.txt"
+    text_path.write_text(FIGURE_SOURCE_TEXT, encoding="utf-8")
+    source = _make_source(session, subject_id, tmp_path, text_path=str(text_path))
+    trial_sentence = (
+        "The deal, which is in limbo as a lawsuit with 12 state "
+        "attorneys general heads to trial in March 2027, has received "
+        "the necessary approvals from regulators."
+    )
+    provider = _FakeProvider(
+        [
+            _valid_candidate(
+                assertion=(
+                    "A lawsuit with 12 state attorneys general heads to "
+                    "trial in March 2027, putting the $110 billion merger "
+                    "in limbo."
+                ),
+                quoted_span=trial_sentence,
+            )
+        ]
+    )
+
+    result = await extract_claims_for_source(session, source, provider)
+
+    assert result.claims == []
+    assert result.rejected[0].reason == "assertion_figure_not_in_quote"
+
+
+async def test_figure_formatting_differences_are_normalized_not_rejected(
+    session: Session, strategy_id: int, tmp_path: Path
+) -> None:
+    """"$110B" in the assertion and "$110 billion" in the quoted_span are
+    the same figure once commas/"$"/magnitude words are normalized -- a
+    real claim must not be rejected purely for restating a figure in
+    shorthand."""
+    subject_id = _persist_subject(session, strategy_id)
+    text_path = tmp_path / "figure_source.txt"
+    text_path.write_text(FIGURE_SOURCE_TEXT, encoding="utf-8")
+    source = _make_source(session, subject_id, tmp_path, text_path=str(text_path))
+    provider = _FakeProvider(
+        [
+            _valid_candidate(
+                assertion="WBD and Paramount have a pending $110B merger.",
+                quoted_span="pending $110 billion merger",
+            )
+        ]
+    )
+
+    result = await extract_claims_for_source(session, source, provider)
+
+    assert len(result.claims) == 1
+    assert result.rejected == []
+
+
+async def test_percent_word_forms_are_normalized_not_rejected(
+    session: Session, strategy_id: int, tmp_path: Path
+) -> None:
+    """"44%" in the assertion and "44 percent" in the quoted_span are the
+    same figure -- "%", "percent", and "per cent" must all normalize to
+    the same (number, "%") tuple."""
+    subject_id = _persist_subject(session, strategy_id)
+    text_path = tmp_path / "percent_source.txt"
+    text_path.write_text("Revenue grew 44 percent year over year.", encoding="utf-8")
+    source = _make_source(session, subject_id, tmp_path, text_path=str(text_path))
+    provider = _FakeProvider(
+        [
+            _valid_candidate(
+                assertion="Revenue grew 44%.",
+                quoted_span="Revenue grew 44 percent",
+            )
+        ]
+    )
+
+    result = await extract_claims_for_source(session, source, provider)
+
+    assert len(result.claims) == 1
+    assert result.rejected == []
+
+
 async def test_disputed_claim_type_from_model_is_rejected_not_persisted(
     session: Session, strategy_id: int, tmp_path: Path
 ) -> None:

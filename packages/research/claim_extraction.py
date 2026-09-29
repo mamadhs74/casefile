@@ -42,13 +42,32 @@ Order, all before any persistence:
       Measured on the real matched span in the source, which can be
       longer than the model's own quote once its whitespace expands back
       to the source's actual line breaks.
-   d. Reject if claim_type or category isn't a recognized value. The
+   d. Reject if the assertion states a dollar amount, percentage, or
+      magnitude-suffixed count (e.g. "$110 billion", "45%", "325
+      million") that does not appear, once normalized, inside that
+      claim's own located span. A claim can locate a real, verbatim
+      passage and still smuggle in a number from elsewhere in the
+      source -- a real finding, not a hypothetical: an assertion cited
+      a $110 billion merger value while its own quoted_span was the
+      unrelated trial-date sentence three sentences later, which never
+      mentions that figure at all (docs/HANDOFF.md). Normalization
+      treats "$110B" and "$110 billion" as the same figure (commas,
+      "$", and "~" stripped; B/bn/billion and M/mn/million unified) so
+      a shorthand restatement of the same number is never a false
+      rejection -- see _figures_in's own docstring for exactly what
+      counts as a figure. Plain integers, dates, and years are out of
+      scope entirely: every branch of the pattern requires a "%", "$",
+      or magnitude suffix to match at all, so "12 states" or "2027"
+      never triggers this check in the first place, not because of a
+      separate date-detection rule but because nothing about them looks
+      like a figure to begin with.
+   e. Reject if claim_type or category isn't a recognized value. The
       provider's own structured-output schema should make this
       unreachable; this check is defensive, not load-bearing.
-   e. Derive confidence mechanically from claim_type, rather than asking
+   f. Derive confidence mechanically from claim_type, rather than asking
       the model for both independently -- see docs/SCHEMA.md for why
       this pairing is fixed instead of modeled as two free axes.
-   f. Reject if packages.domain.content_safety.check_text() matches
+   g. Reject if packages.domain.content_safety.check_text() matches
       either the candidate's assertion or its located quoted_span --
       this is the "source content" half of that filter (the other
       half, statement-only, is enforced unconditionally at
@@ -72,6 +91,7 @@ step's job, not something a single-source extraction pass does.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -84,6 +104,78 @@ from packages.domain.spans import locate_span
 from packages.research.llm_provider import ClaimExtractionProvider, ProposedClaim
 
 MAX_QUOTED_SPAN_CHARS = 800
+
+# Word/abbreviation forms map to a single canonical letter so "$110B"
+# and "$110 billion" compare equal -- see _figures_in's own docstring.
+# Matched case-insensitively; a stray lowercase "b"/"m"/"k" immediately
+# after a number is treated the same as its uppercase form, a
+# deliberate heuristic looseness rather than exhaustive correctness
+# (same posture as this module's other pattern-matching checks).
+_MAGNITUDE_CANONICAL: dict[str, str] = {
+    "b": "B", "bn": "B", "billion": "B",
+    "m": "M", "mn": "M", "million": "M",
+    "k": "K", "thousand": "K",
+}
+_MAGNITUDE_WORD = r"(?:billion|bn|million|mn|thousand|b|m|k)"
+
+# Three alternatives, tried in order: a percentage ("44%", "44
+# percent", "44 per cent" all normalize the same way), a dollar figure
+# (magnitude suffix optional -- "$500" alone is still a figure worth
+# checking), or a bare magnitude-suffixed count with no currency sign
+# ("325M subscribers", "180 million viewers"). A bare number with no
+# magnitude, no "$", and no "%"/"percent" never matches any branch --
+# that's what keeps "12 states", "5 days", and "2027" out of scope
+# without a separate date/year-detection rule.
+_FIGURE_PATTERN = re.compile(
+    rf"""
+    (?P<percent_num>\d+(?:\.\d+)?)\s*(?:%|per\s*cent)
+    |
+    \$\s*~?\s*(?P<dollar_num>[\d,]+(?:\.\d+)?)(?:\s*(?P<dollar_mag>{_MAGNITUDE_WORD}))?\b
+    |
+    ~?(?P<bare_num>[\d,]+(?:\.\d+)?)\s*(?P<bare_mag>{_MAGNITUDE_WORD})\b
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def _normalize_figure_number(raw: str) -> str:
+    """Strips "$"/","/"~" and collapses a trailing ".0" -- just enough
+    to compare "110" against "110.0" or "110,000" against "110000" as
+    the same number, not a general numeric-equality library."""
+    cleaned = raw.replace(",", "").replace("$", "").replace("~", "")
+    if "." in cleaned:
+        cleaned = cleaned.rstrip("0").rstrip(".")
+    return cleaned or "0"
+
+
+def _figures_in(text: str) -> set[tuple[str, str]]:
+    """Every percentage, dollar figure, or magnitude-suffixed bare count
+    in text, normalized to (number, magnitude) so pure formatting
+    differences ("$110B" vs "$110 billion", "45M" vs "45 million")
+    compare equal. magnitude is "%" for a percentage, "" for a dollar
+    figure with no magnitude word, or "B"/"M"/"K" otherwise. See
+    _FIGURE_PATTERN's own comment for what counts as a figure at all --
+    plain integers, dates, and years never do."""
+    figures: set[tuple[str, str]] = set()
+    for match in _FIGURE_PATTERN.finditer(text):
+        if match.group("percent_num"):
+            figures.add((_normalize_figure_number(match.group("percent_num")), "%"))
+        elif match.group("dollar_num"):
+            magnitude = match.group("dollar_mag")
+            canonical = _MAGNITUDE_CANONICAL[magnitude.lower()] if magnitude else ""
+            figures.add((_normalize_figure_number(match.group("dollar_num")), canonical))
+        elif match.group("bare_num"):
+            magnitude = match.group("bare_mag")
+            number = _normalize_figure_number(match.group("bare_num"))
+            figures.add((number, _MAGNITUDE_CANONICAL[magnitude.lower()]))
+    return figures
+
+
+def _unsupported_figures(assertion: str, quoted_span: str) -> set[tuple[str, str]]:
+    """Figures present in the assertion but absent from the claim's own
+    located quoted_span -- see claim_extraction_for_source's module
+    docstring, step 3d."""
+    return _figures_in(assertion) - _figures_in(quoted_span)
 
 # SOURCING.md's `type`/`confidence` fields look independent but overlap in
 # what they're meant to capture (see docs/SCHEMA.md); for extraction this
@@ -105,7 +197,8 @@ class RejectedClaim:
     assertion: str
     quoted_span: str
     reason: str  # "empty_quote" | "quote_not_found" | "span_too_long" |
-    # "invalid_claim_type" | "invalid_category" | "content_safety_rejected"
+    # "assertion_figure_not_in_quote" | "invalid_claim_type" |
+    # "invalid_category" | "content_safety_rejected"
 
 
 @dataclass(frozen=True)
@@ -276,6 +369,10 @@ def _validate(candidate: ProposedClaim, source_text: str) -> _ValidatedCandidate
     if span_end - span_start > MAX_QUOTED_SPAN_CHARS:
         return "span_too_long"
 
+    real_quote = source_text[span_start:span_end]
+    if _unsupported_figures(candidate.assertion, real_quote):
+        return "assertion_figure_not_in_quote"
+
     try:
         claim_type = ClaimType(candidate.claim_type)
     except ValueError:
@@ -295,5 +392,5 @@ def _validate(candidate: ProposedClaim, source_text: str) -> _ValidatedCandidate
         category=category,
         span_start=span_start,
         span_end=span_end,
-        quoted_span=source_text[span_start:span_end],
+        quoted_span=real_quote,
     )
