@@ -15,6 +15,11 @@ docs/SCHEMA.md):
     uv run python -m scripts.extract_claims --source-id 1 --dry-run
     uv run python -m scripts.extract_claims --source-id 1
     uv run python -m scripts.extract_claims --source-id 1 --force
+    uv run python -m scripts.extract_claims --source-id 1 --dry-run --provider groq
+
+--provider defaults to gemini. No automatic failover between providers
+-- this selects one explicitly, per-run, same posture as
+scripts/compose_episode.py's own --provider flag.
 """
 
 from __future__ import annotations
@@ -31,7 +36,8 @@ from packages.db.models import Source
 from packages.db.session import get_session
 from packages.research.claim_extraction import ClaimExtractionResult, extract_claims_for_source
 from packages.research.gemini_provider import DEFAULT_MODEL, GeminiClaimExtractor
-from packages.research.llm_provider import ExtractionProviderError
+from packages.research.groq_provider import GroqClaimExtractor
+from packages.research.llm_provider import ClaimExtractionProvider, ExtractionProviderError
 
 
 async def main() -> int:
@@ -50,21 +56,40 @@ async def main() -> int:
         help="Re-extract even if this source already has linked claims. "
         "Adds a new batch alongside the existing ones -- never deletes or merges.",
     )
-    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--model", default=None)
+    parser.add_argument(
+        "--provider",
+        choices=["gemini", "groq"],
+        default="gemini",
+        help="Extraction provider to use. No automatic failover between "
+        "providers -- this selects one explicitly, per-run.",
+    )
     args = parser.parse_args()
 
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        print("GEMINI_API_KEY is not set (see .env.example).", file=sys.stderr)
-        return 1
+    provider: ClaimExtractionProvider
+    if args.provider == "gemini":
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            print("GEMINI_API_KEY is not set (see .env.example).", file=sys.stderr)
+            return 1
+        model = args.model or DEFAULT_MODEL
+        provider = GeminiClaimExtractor(api_key, model=model)
+    else:
+        groq_api_key = os.environ.get("GROQ_API_KEY")
+        if not groq_api_key:
+            print("GROQ_API_KEY is not set (see .env.example).", file=sys.stderr)
+            return 1
+        groq_model = args.model or os.environ.get("GROQ_MODEL")
+        if not groq_model:
+            print("GROQ_MODEL is not set (see .env.example).", file=sys.stderr)
+            return 1
+        provider = GroqClaimExtractor(groq_api_key, groq_model)
 
     with get_session() as session:
         source = session.get(Source, args.source_id)
         if source is None:
             print(f"no Source with id={args.source_id}", file=sys.stderr)
             return 1
-
-        provider = GeminiClaimExtractor(api_key, model=args.model)
 
         if args.dry_run:
             await _print_request_preview(provider, source)
@@ -81,17 +106,26 @@ async def main() -> int:
         return 0
 
 
-async def _print_request_preview(provider: GeminiClaimExtractor, source: Source) -> None:
+async def _print_request_preview(
+    provider: GeminiClaimExtractor | GroqClaimExtractor, source: Source
+) -> None:
     source_text = Path(source.text_path).read_text(encoding="utf-8")
     preview = provider.preview_request(source_text, source.tier.value)
-    token_count = await provider.count_tokens(source_text, source.tier.value)
 
     print("=== request shape ===")
     print(f"system_instruction ({len(preview.system_instruction)} chars):")
     print(preview.system_instruction)
     print(f"\ncontents ({len(preview.contents)} chars):")
     print(preview.contents)
-    print(f"\n=== token estimate (real, via count_tokens) ===\n{token_count} total input tokens\n")
+
+    # count_tokens is Gemini-specific (its own free count_tokens
+    # endpoint) -- GroqClaimExtractor has no equivalent, same posture
+    # as groq_composition_provider.py not implementing one either.
+    if isinstance(provider, GeminiClaimExtractor):
+        token_count = await provider.count_tokens(source_text, source.tier.value)
+        print(
+            f"\n=== token estimate (real, via count_tokens) ===\n{token_count} total input tokens\n"
+        )
 
 
 def _report(result: ClaimExtractionResult, dry_run: bool) -> None:
