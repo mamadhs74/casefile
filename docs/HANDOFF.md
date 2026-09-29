@@ -710,6 +710,32 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
     5. Facebook stays deferred — no work planned until the `Channel` refactor and Meta OAuth are
        separately prioritized.
 
+48. **Episode 1's thesis is factually superseded — found by reading the claim table against the
+    episode's own sources, not by any pipeline check.** Claim 101 (`hollywoodreporter.com`,
+    published 2026-06-24) says the anti-merger lawsuit is "expected within a month." Source 15
+    (`thewrap.com`, published 2026-08-10 — seven weeks later) reports a lawsuit with 12 state
+    attorneys general already heading to trial in March 2027. The episode's thesis, Sequence, and
+    Return all state the lawsuit is unfiled — true as of claim 101's June publication date, false
+    as of source 15's August one. **Source 15 had zero Gemini-extracted claims** (the zero-yield
+    investigation this session's own findings above cover in detail), so the contradicting fact
+    was never in the claim table `generate_script` built the thesis against in the first place —
+    this isn't a claim-selection error, the claim didn't exist to select.
+
+    **Episode 1 (`oXuKZpH1IME`) stays private. Do not publish as-is.** Rewriting the thesis is an
+    editorial act requiring a human decision about what the corrected argument should say — not
+    something this session did or should do unilaterally.
+
+    **Three pipeline gaps this exposes, none built:**
+    - No source publication-date window is enforced per subject — nothing stops a thesis being
+      authored against a claim table that spans sources published weeks or months apart with no
+      visibility into which claims are stale relative to which others.
+    - Relative-time claims ("expected within a month," "at this time," "recently") are stored and
+      composed with no anchor back to their source's `published_date` — the claim table has no
+      mechanism to express "true as of when this was published," only the bare assertion text.
+    - Claims aren't presented newest-first (or date-sorted at all) during thesis authoring — a
+      human writing a thesis has no structural cue that a later, contradicting source exists
+      versus an earlier one already incorporated.
+
 ---
 
 ## 8. Entity extraction: validated
