@@ -718,8 +718,11 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
     Return all state the lawsuit is unfiled — true as of claim 101's June publication date, false
     as of source 15's August one. **Source 15 had zero Gemini-extracted claims** (the zero-yield
     investigation this session's own findings above cover in detail), so the contradicting fact
-    was never in the claim table `generate_script` built the thesis against in the first place —
-    this isn't a claim-selection error, the claim didn't exist to select.
+    was never available when the thesis was written. The thesis is human-authored, not model-
+    generated (§11: "Thesis-bearing is hand-flagged, never model-inferred") — the person who wrote
+    it did so against the claim table as it existed, which was missing this fact entirely. This
+    isn't a claim-selection error, and it isn't an editorial oversight either — the claim didn't
+    exist to select or to weigh.
 
     **Episode 1 (`oXuKZpH1IME`) stays private. Do not publish as-is.** Rewriting the thesis is an
     editorial act requiring a human decision about what the corrected argument should say — not
