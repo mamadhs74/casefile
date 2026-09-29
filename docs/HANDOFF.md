@@ -529,6 +529,175 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
     token. Episode 1 uploaded successfully once all three were fixed: video id `oXuKZpH1IME`,
     private, synthetic-media disclosure set, per R5.
 
+47. **Full session summary: episode 1 shipped end to end, a second composition provider and a
+    second extraction provider both added, and two real bugs found in existing code along the
+    way.** Finding #46 above covers only the OAuth piece; this covers everything else from the
+    same session.
+
+    **Episode 1, done.** Composed (Groq), rendered — all six sections, not the three
+    `render_episode.py` used to produce (see below) — and uploaded private as `oXuKZpH1IME`. This
+    is the first episode this project has taken all the way from claim pool to a real YouTube
+    video id.
+
+    **Groq added as a second composition provider**
+    (`packages/script/groq_composition_provider.py`), behind the existing `CompositionProvider`
+    protocol, unchanged. Selected explicitly via `scripts/compose_episode.py --provider
+    {gemini,groq}` (default `gemini`) — no automatic failover, no fallback chain. Writes to its
+    own `compose_cache.groq.json`/`composed_script.groq.json`, never touching Gemini's
+    `compose_cache.json` — the two providers' output has stayed fully isolated across every run
+    this session, confirmed by checksum more than once.
+
+    **Composition prompt tuning found a real bug in `chronological.py`, not just a prompt
+    problem.** Early attempts to fix Groq's under-length sections by telling it word targets were
+    a floor, not a ceiling, repeatedly caused fabrication instead — invented donor motives
+    ("in a bid to influence campaign financing," not in any claim), invented attribution
+    ("industry sources reported," naming a source no claim names), and invented connective
+    clauses padding claims that were already fully stated. Root cause, not just a symptom:
+    `chronological.py`'s section budgets are `claims × WORDS_PER_CLAIM × fixed section share`
+    (`GROUND_SHARE=0.10`, `SEQUENCE_SHARE=0.65`, `RESOLUTION_SHARE=0.14`, etc.) — a percentage of
+    the *episode's* claim count, with no relationship to how much a given section's *own* claims
+    actually support in prose. Telling a model to hit a target derived that way, on a floor-not-
+    ceiling framing, makes fabrication the model's only way to comply when the target is simply
+    too high for what the claims contain. Fix applied only to the Groq prompt: `word_budget` and
+    the per-claim `word_target` field were removed from what's sent to the model entirely —
+    sections are now sized by claim content, not steered toward a number.
+    `ClaimForComposition.word_target` still exists and `chronological.py` is untouched, per that
+    task's own scope. **The underlying bug in `chronological.py` is not fixed and affects the
+    Gemini path identically** — Gemini's prompt still receives and is steered by the same
+    fixed-share budgets; it hasn't been observed fabricating as visibly, but nothing about the
+    root cause is provider-specific.
+
+    **`render_episode.py` was silently dropping half the composed episode.** `_load_sections()`
+    hardcoded a 3-tuple (`ground`, `sequence`, `resolution`) with no comment explaining the
+    omission — Cold Open, Thesis, and Return were composed, written to
+    `composed_script.json`, and never rendered. This included **the human-authored thesis**,
+    the one piece of editorial content in the entire pipeline that isn't model output. Fixed to
+    render all six sections in narrative order; episode 1 was re-rendered afterward at
+    133.5s total (final duration figure for the 3-section render was not separately recorded,
+    so no before/after comparison is claimed here).
+
+    **Font/glyph fix, one identified gap left open.** `Georgia.ttf` (`FONT_BODY`,
+    `packages/visual/cards.py`) has no glyphs for curly quotes (`U+2019`), non-breaking hyphens
+    (`U+2011`), or en/em dashes — these rendered as missing-glyph boxes on cards. Normalized to
+    ASCII equivalents at render time only, in `render_episode.py`, never touching
+    `composed_script.json` on disk. **`U+202F` (narrow no-break space, from Groq's own
+    `"$111 billion"`-style number formatting) was identified as the same class of problem
+    but is NOT yet fixed** — it's not a quote/hyphen/dash, so it fell outside that task's stated
+    scope.
+
+    **Publish template fixed to stop overclaiming.** `packages/strategies/film_tv_news/
+    publish_template.py`'s disclosure line said "AI-generated narration and imagery" — the render
+    path produces text cards only, no generated imagery exists anywhere in this pipeline yet
+    (§6). Changed to "AI-generated narration." Only affects future uploads; episode 1's live
+    description still has the old wording until finding #46's follow-up sync is done (see that
+    finding's task 1, blocked on a scope gap — `videos.list` 403s under `youtube.upload`-only
+    scope, so there's no safe way to read back the current `categoryId` `videos.update` requires
+    resending; re-auth with the broader `youtube` scope was chosen as the fix, pending a fresh
+    incognito consent run).
+
+    **Two credential rotations tonight.** Both the Groq and Gemini API keys were accidentally
+    pasted into chat during the session; both were rotated in their respective consoles, and
+    `.env` was rebuilt clean afterward. Treat this as a live incident record, not a hypothetical
+    — check `.env` is in fact gitignored and neither old key is referenced anywhere before
+    trusting this is fully closed.
+
+    **Groq added as a second claim-extraction provider**
+    (`packages/research/groq_provider.py`), behind the existing `ClaimExtractionProvider`
+    protocol (`packages/research/llm_provider.py`), unchanged — `claim_extraction.py`,
+    the protocol, and `gemini_provider.py` were not touched. `scripts/extract_claims.py` gained
+    the same `--provider {gemini,groq}` flag (default `gemini`) as the composition script. Dry-run
+    tested against subject 10 / source 15 (thewrap.com) — the source that measured zero real
+    claims under Gemini (§ finding investigated separately this session) turned out to have real
+    extractable content; Groq's dry run found 13 valid candidates in it.
+
+    **CRITICAL, fixed: Groq's `json_object` mode has no server-side schema enforcement.**
+    Gemini's `response_schema` makes an out-of-vocabulary `claim_type`/`category` structurally
+    impossible — the API itself constrains the output. Groq's JSON-object mode is a prompt
+    instruction, not a schema constraint, and the first real run proved the difference: the model
+    emitted categories like `"profit"`, `"subscriber"`, `"revenue"` — plausible, but not in
+    `{event, person, location, timeline, evidence, legal_outcome}` — and because
+    `groq_provider.py`'s first draft typed those fields as strict `Literal[...]` (copying
+    `gemini_provider.py`'s model verbatim), one bad candidate crashed pydantic validation for the
+    *entire* batch of 22+ candidates, not just the bad one. Fixed by typing `claim_type`/`category`
+    as plain `str` on `GroqClaimExtractor`'s own response model, matching `ProposedClaim`'s own
+    typing exactly — `claim_extraction.py`'s existing per-candidate defensive check (step 3d in
+    that module's own docstring, already built for exactly this) now does the rejection work,
+    one candidate at a time, without `claim_extraction.py` itself changing at all.
+
+    **CRITICAL, UNFIXED: Groq still loses real yield to invented category names.** Of 24 raw
+    candidates from source 15, 1 was rejected for `quote_not_found` (a genuine near-miss quote).
+    Of the remaining 23 candidates — each with a real, verbatim-located quote — **10 (43%) were
+    rejected for `invalid_category`**, every one of them a specific financial figure (subscriber
+    counts, revenue, profit dollar amounts) that Groq tagged with an invented category word
+    instead of picking from the fixed vocabulary. These are not hallucinated facts — the
+    underlying assertions and quotes are real and would very likely be accepted claims under
+    Gemini — they're being thrown away purely because Groq didn't pick a valid label. Needs
+    either a prompt fix (explicit enumerated vocabulary constraint in the system instruction,
+    the same class of fix already applied to the composition side once `word_budget` caused
+    fabrication there) or a normalization/remapping step before any Groq extraction output is
+    used outside dry-run. **Not safe to use for real extraction as it stands** — dry-run only.
+
+    **Long-form runtime needs roughly 2-3x today's claim yield, and the lever to get there is
+    now identified, not yet pulled.** Subject 10 (one full week of film-tv-news sourcing) yielded
+    32 real claims total across 5 sources; episode 1 used 11 of them. A long-form episode in the
+    8-10 minute range that finding #11's own arithmetic already establishes (`claims ×
+    WORDS_PER_CLAIM(18) ÷ 145-160 wpm`) needs roughly 60-100 claims, not 32. Finding #38 already
+    measured why: claim yield per article varies roughly 5x by article shape — conventional
+    reporting (`hollywoodreporter.com` 2.96, `deadline.com` 3.45 claims/1000 chars) against
+    listicles and roundups (`variety.com` 0.60, `indiewire.com` 0.55). **Three of subject 10's
+    five sources were exactly the low-yield shape** — variety.com's streaming listicle,
+    indiewire.com's festival-lineup announcement, and thewrap.com (a cross-company financial
+    comparison piece, this session's own source 15 investigation). Proposed, not implemented:
+    select for conventional-reporting shape at sourcing time, before fetching, not after —
+    the highest-leverage lever toward long-form identified so far, because it changes which
+    articles get pulled in rather than trying to extract harder from a shape that structurally
+    doesn't have the density.
+
+    **Criminal-cases strategy re-confirmed dead, via a live gate re-run against current DB
+    state, not a re-statement of finding #32.** Subject 8 (Borden) scores `1/1/1` against
+    `3/1/3`, unchanged. Subject 9 (Hinterkaifeck) scores `1/0/1` against the same threshold —
+    worse, since its one verified source is `REFERENCE` tier, not Tier A. **Both real subjects
+    fail.** Worth flagging explicitly so this doesn't drift back into looking solved: subject 1
+    ("The Vanishing of the SS Meridian") does pass, `3/2/3` — but `scripts/seed_dev.py`'s own
+    comment says outright it's a synthetic fixture built specifically to exercise gate-passing
+    logic in tests, with invented URLs and one claim per source. It is not evidence strategy 1
+    has a real viable subject, and any future measurement that reports "strategy 1 has a
+    passing subject" without checking which subject it's counting has drifted, not found new
+    information.
+
+    **Facebook / multi-platform: not started.** Blocked on two things, both harder than
+    tonight's YouTube work: the `Channel` table refactor finding #44 already named (credentials
+    need to move off `Strategy` onto `Channel` before a second platform can coexist with
+    YouTube), and a full Meta OAuth integration from zero (Instagram Graph API requires a
+    Business/Creator account linked to a Facebook Page — nothing like tonight's single-scope
+    YouTube consent flow).
+
+    **Thumbnails: not started.** No image sourcing or generation exists anywhere in this
+    pipeline (§6, unchanged). Episode 1's current YouTube thumbnail is whatever frame YouTube
+    auto-picked from the uploaded video — not a designed thumbnail, not even a deliberately
+    selected frame.
+
+    **A persisted extraction-attempt log was requested this session and was not built.**
+    Investigating source 15's zero-claim outcome exposed that `content_safety.log_rejection()`
+    only calls `logging.warning()` — no table, no file, nothing durable. There is no way to
+    later ask "was this source ever run through extraction, and what happened" without
+    re-running it. The dry-run investigation this session used was a one-off, cheaper substitute
+    for that specific question, not a fix to the underlying gap — the gap is still open for the
+    next source that produces a surprising zero.
+
+    **Next steps, in order:**
+    1. Fix Groq extraction's category yield loss (the 43% figure above) before using it for
+       anything beyond dry-run — this is the one item blocking Groq extraction from being usable
+       at all.
+    2. Implement an article-shape sourcing rule (prefer conventional reporting, deprioritize
+       listicles/roundups/lineup pieces) at sourcing time.
+    3. Once (1) is fixed, re-run real extraction on subject 10's sources to get an updated,
+       trustworthy claims-per-subject number — today's 32 is measured under Gemini only, with
+       source 15 never actually extracted for real under either provider.
+    4. Decide the long-form path only after (3) gives a real number to plan against, not before.
+    5. Facebook stays deferred — no work planned until the `Channel` refactor and Meta OAuth are
+       separately prioritized.
+
 ---
 
 ## 8. Entity extraction: validated
