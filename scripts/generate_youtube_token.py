@@ -34,7 +34,14 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 CLIENT_SECRET_PATH = Path("credentials/film-tv-news/client_secret.json")
 TOKEN_PATH = Path("credentials/film-tv-news/token.json")
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+# Widened from youtube.upload-only: that scope alone cannot call
+# videos.list, so there was no way to read a video's current metadata
+# (e.g. snippet.categoryId, required by videos.update whenever
+# snippet.title/description change) before overwriting it. The plain
+# "youtube" scope covers both read and write; youtube.upload is a
+# subset of what this grants, so nothing already built against the
+# narrower scope needs to change.
+SCOPES = ["https://www.googleapis.com/auth/youtube"]
 
 
 class SetupAborted(Exception):
