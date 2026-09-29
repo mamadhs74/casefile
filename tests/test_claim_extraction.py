@@ -186,6 +186,35 @@ async def test_close_but_not_exact_quote_is_rejected(
     assert result.rejected[0].reason == "quote_not_found"
 
 
+async def test_case_difference_in_quote_is_accepted_span_keeps_source_casing(
+    session: Session, strategy_id: int, tmp_path: Path
+) -> None:
+    """A real Groq extraction lowercased a sentence-initial word
+    ("the deal" for "The deal") while reproducing an otherwise-perfect
+    quote, and rejecting it cost the one candidate that falsified
+    episode 1's thesis (docs/HANDOFF.md #48/#49). Case is not content --
+    unlike a substituted word, a bare case difference must not fail this
+    check. The persisted quoted_span must still be the source's own
+    text, with its own casing, not the model's lowercase version."""
+    subject_id = _persist_subject(session, strategy_id)
+    source = _make_source(session, subject_id, tmp_path)
+    model_quote = VALID_QUOTE.lower()
+    assert model_quote != VALID_QUOTE
+    assert model_quote not in SOURCE_TEXT
+    provider = _FakeProvider([_valid_candidate(quoted_span=model_quote)])
+
+    result = await extract_claims_for_source(session, source, provider)
+
+    assert len(result.claims) == 1
+    claim = result.claims[0]
+    assert claim.quoted_span == VALID_QUOTE  # source's real casing, not the model's
+    assert claim.span_start == SOURCE_TEXT.find(VALID_QUOTE)
+    assert claim.span_end == claim.span_start + len(VALID_QUOTE)
+
+    link = session.exec(select(ClaimSource).where(ClaimSource.claim_id == claim.claim_id)).one()
+    assert link.quoted_span == VALID_QUOTE
+
+
 async def test_quote_matches_across_a_pdf_line_wrap(
     session: Session, strategy_id: int, tmp_path: Path
 ) -> None:
@@ -428,13 +457,25 @@ async def test_reextraction_without_force_is_a_noop_and_skips_the_provider_call(
 async def test_forced_reextraction_adds_a_second_batch_without_touching_the_first(
     session: Session, strategy_id: int, tmp_path: Path
 ) -> None:
+    """The second candidate here locates a genuinely different span from
+    the first -- not the same passage proposed twice, which is now
+    caught by the duplicate_span dedupe (see the test below) instead of
+    producing a second, identical Claim+ClaimSource pair."""
     subject_id = _persist_subject(session, strategy_id)
     source = _make_source(session, subject_id, tmp_path)
     provider = _FakeProvider([_valid_candidate()])
     first = await extract_claims_for_source(session, source, provider)
     first_claim_id = first.claims[0].claim_id
 
-    second = await extract_claims_for_source(session, source, provider, force=True)
+    second_provider = _FakeProvider(
+        [
+            _valid_candidate(
+                assertion="Investigators later determined the family had been killed.",
+                quoted_span="Investigators later determined the family had",
+            )
+        ]
+    )
+    second = await extract_claims_for_source(session, source, second_provider, force=True)
 
     assert second.skipped_already_extracted is False
     assert len(second.claims) == 1
@@ -442,6 +483,27 @@ async def test_forced_reextraction_adds_a_second_batch_without_touching_the_firs
     all_claims = session.exec(select(Claim)).all()
     assert len(all_claims) == 2
     assert session.get(Claim, first_claim_id) is not None  # untouched, not deleted
+
+
+async def test_forced_reextraction_skips_a_candidate_matching_an_existing_span(
+    session: Session, strategy_id: int, tmp_path: Path
+) -> None:
+    """force=True is for adding genuinely new claims a first pass
+    missed, not for creating a second, identical Claim+ClaimSource pair
+    every time the same passage gets proposed again. A candidate whose
+    located span already backs an existing claim for this source is
+    skipped, not duplicated."""
+    subject_id = _persist_subject(session, strategy_id)
+    source = _make_source(session, subject_id, tmp_path)
+    provider = _FakeProvider([_valid_candidate()])
+    first = await extract_claims_for_source(session, source, provider)
+    assert len(first.claims) == 1
+
+    second = await extract_claims_for_source(session, source, provider, force=True)
+
+    assert second.claims == []
+    assert second.rejected[0].reason == "duplicate_span"
+    assert len(session.exec(select(Claim)).all()) == 1  # no duplicate persisted
 
 
 async def test_zero_claims_on_tier_a_source_is_flagged(

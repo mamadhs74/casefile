@@ -739,6 +739,21 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
       human writing a thesis has no structural cue that a later, contradicting source exists
       versus an earlier one already incorporated.
 
+49. **Finding #48 remains open — source 15's real Groq extraction ran (27 created, 2 rejected),
+    and the one candidate that would have closed the gap didn't survive.** The candidate stating
+    the 12-state-AG lawsuit heading to trial in March 2027 — the fact that falsifies episode 1's
+    thesis — was rejected for `quote_not_found`: its attempted quote began "the deal, which is in
+    limbo..." (lowercase) where the source reads "**The** deal, which is in limbo..." (sentence-
+    initial capital), a one-character case mismatch under the byte-exact matching rule at the
+    time. Its assertion separately imported "$110 billion" from a different sentence entirely, so
+    the new figure check (finding #47 above) would have rejected it on that basis too, had it
+    reached that step. Of the 27 claims that *did* get created, exactly one mentions the dispute
+    at all — "Paramount expects the deal will close five days after the outcome of a trial, or
+    June 1, 2027, whichever is earliest" — and it never says a lawsuit exists, never names the
+    attorneys general, and never gives the trial date. A person reading only what's in the DB
+    today would have no reason to doubt the thesis. **Finding #48's underlying gap is not closed
+    by this run.**
+
 ---
 
 ## 8. Entity extraction: validated

@@ -20,23 +20,39 @@ Order, all before any persistence:
 3. For each proposed claim, in order:
    a. Reject if quoted_span is blank.
    b. Reject if quoted_span is not found in the source's text once
-      whitespace is normalized -- every run of whitespace (space,
-      newline, tab) matches any run of whitespace, but every other
-      character must match literally. This is not a relaxation of the
-      hallucination check: a substituted word, an invented clause, or
-      reordered content still fails outright, because those aren't
-      whitespace. What it fixes is real: PDF extraction preserves the
-      source document's physical line breaks, so a quote spanning even
-      one line-wrap in the original PDF contains a `\n` mid-sentence that
-      no model reproduces (nor should it -- reproducing arbitrary
-      column-width line breaks isn't "more faithful," it's reproducing a
-      rendering artifact). A byte-exact rule rejects that quote for a
-      reason that has nothing to do with whether the claim is true or the
-      citation is real. See docs/SCHEMA.md for the investigation that
-      found this: on a real court-opinion PDF, every substantive claim
-      was rejected this way and only a one-line filing-date stamp
-      survived, which is a corpus-wide bias against exactly the sentences
-      an episode would use, not evidence of a well-functioning filter.
+      whitespace is normalized and case differences are ignored -- every
+      run of whitespace (space, newline, tab) matches any run of
+      whitespace, and a letter matches its own upper/lowercase form, but
+      every other character must match literally. This is not a
+      relaxation of the hallucination check: a substituted word, an
+      invented clause, or reordered content still fails outright,
+      because those aren't whitespace or case. What whitespace-tolerance
+      fixes is real: PDF extraction preserves the source document's
+      physical line breaks, so a quote spanning even one line-wrap in
+      the original PDF contains a `\n` mid-sentence that no model
+      reproduces (nor should it -- reproducing arbitrary column-width
+      line breaks isn't "more faithful," it's reproducing a rendering
+      artifact). A byte-exact rule rejects that quote for a reason that
+      has nothing to do with whether the claim is true or the citation
+      is real. See docs/SCHEMA.md for the investigation that found this:
+      on a real court-opinion PDF, every substantive claim was rejected
+      this way and only a one-line filing-date stamp survived, which is
+      a corpus-wide bias against exactly the sentences an episode would
+      use, not evidence of a well-functioning filter. Case-tolerance
+      fixes the same class of problem, found later: a real Groq
+      extraction lowercased a sentence-initial word ("the deal" for
+      "The deal") reproducing an otherwise-perfect quote, and rejecting
+      it cost the one candidate that falsified episode 1's thesis
+      (docs/HANDOFF.md #48/#49) over a difference that isn't content.
+      The persisted quoted_span is still sliced from source_text by the
+      located (start, end) offsets, so it always carries the source's
+      own real casing, never the model's -- case-insensitivity only
+      widens what can be *found*, it never changes what gets *stored*.
+      This uses a local, case-insensitive location function scoped to
+      this module only -- packages/domain/spans.py's own locate_span
+      (whitespace-tolerant, case-sensitive) is unchanged, since it also
+      backs packages/db/listeners.py's Entity.living_evidence check
+      (R8), a stricter invariant this task was not asked to loosen.
    c. Reject if the located span exceeds MAX_QUOTED_SPAN_CHARS -- a
       "supporting passage" longer than that isn't reviewable in seconds.
       Measured on the real matched span in the source, which can be
@@ -67,7 +83,20 @@ Order, all before any persistence:
    f. Derive confidence mechanically from claim_type, rather than asking
       the model for both independently -- see docs/SCHEMA.md for why
       this pairing is fixed instead of modeled as two free axes.
-   g. Reject if packages.domain.content_safety.check_text() matches
+   g. Reject if the candidate's located (span_start, span_end) already
+      backs an existing ClaimSource for this source -- this is what
+      keeps force=True's "adds a second batch, never deletes or merges"
+      contract (step 1 above) from also meaning "duplicates every claim
+      that gets proposed again." force exists so a human can add
+      genuinely new claims a first pass missed, not to multiply an
+      identical Claim+ClaimSource pair each time the same passage gets
+      re-proposed. Checked against every ClaimSource already in the DB
+      for this source_id, plus every span already accepted earlier in
+      this same run -- two identical candidates in one provider response
+      are caught the same way a re-run's duplicate is. A fresh source
+      with nothing extracted yet has no existing spans, so this step
+      never rejects anything on a first pass.
+   h. Reject if packages.domain.content_safety.check_text() matches
       either the candidate's assertion or its located quoted_span --
       this is the "source content" half of that filter (the other
       half, statement-only, is enforced unconditionally at
@@ -100,7 +129,6 @@ from sqlmodel import Session, select
 from packages.db.models import Claim, ClaimSource, Source
 from packages.domain.content_safety import check_text, log_rejection
 from packages.domain.enums import TIER_A_SOURCE_TIERS, ClaimCategory, ClaimConfidence, ClaimType
-from packages.domain.spans import locate_span
 from packages.research.llm_provider import ClaimExtractionProvider, ProposedClaim
 
 MAX_QUOTED_SPAN_CHARS = 800
@@ -177,6 +205,23 @@ def _unsupported_figures(assertion: str, quoted_span: str) -> set[tuple[str, str
     docstring, step 3d."""
     return _figures_in(assertion) - _figures_in(quoted_span)
 
+
+def _locate_span_case_insensitive(quote: str, source_text: str) -> tuple[int, int] | None:
+    """Same whitespace-tolerant approach as packages.domain.spans.locate_span
+    (built from quote's own whitespace-delimited tokens, escaped, joined
+    by \\s+, searched directly against source_text so the real offsets
+    come straight from the match), plus case-insensitivity -- see module
+    docstring step 3b for why this module doesn't reuse the shared
+    function as-is. Returns source_text's own (start, end); the caller
+    slices source_text[start:end] to get the source's real casing back,
+    never the model's."""
+    tokens = quote.split()
+    pattern = r"\s+".join(re.escape(token) for token in tokens)
+    match = re.search(pattern, source_text, re.IGNORECASE)
+    if match is None:
+        return None
+    return match.start(), match.end()
+
 # SOURCING.md's `type`/`confidence` fields look independent but overlap in
 # what they're meant to capture (see docs/SCHEMA.md); for extraction this
 # pairing is fixed, not asked of the model as two free choices.
@@ -198,7 +243,7 @@ class RejectedClaim:
     quoted_span: str
     reason: str  # "empty_quote" | "quote_not_found" | "span_too_long" |
     # "assertion_figure_not_in_quote" | "invalid_claim_type" |
-    # "invalid_category" | "content_safety_rejected"
+    # "invalid_category" | "duplicate_span" | "content_safety_rejected"
 
 
 @dataclass(frozen=True)
@@ -257,6 +302,7 @@ async def extract_claims_for_source(
 
     extracted: list[ExtractedClaim] = []
     rejected: list[RejectedClaim] = []
+    seen_spans = _existing_span_set(session, source_id)
 
     for candidate in proposed:
         outcome = _validate(candidate, source_text)
@@ -266,6 +312,23 @@ async def extract_claims_for_source(
                     assertion=candidate.assertion,
                     quoted_span=candidate.quoted_span,
                     reason=outcome,
+                )
+            )
+            continue
+
+        # Step 3g (module docstring) -- force=True must not duplicate a
+        # claim whose exact span already backs one for this source.
+        # seen_spans is seeded from the DB and grows only as this run
+        # actually accepts candidates (below, after content-safety) --
+        # checked here first so a candidate doesn't pay for a span a
+        # different, since-rejected candidate merely attempted.
+        span_key = (outcome.span_start, outcome.span_end)
+        if span_key in seen_spans:
+            rejected.append(
+                RejectedClaim(
+                    assertion=candidate.assertion,
+                    quoted_span=candidate.quoted_span,
+                    reason="duplicate_span",
                 )
             )
             continue
@@ -292,6 +355,12 @@ async def extract_claims_for_source(
                 )
             )
             continue
+
+        # Only now, once this candidate will actually be created below --
+        # a candidate rejected above (content-safety or otherwise) never
+        # occupies its span, so a later, distinct candidate that happens
+        # to locate the same span is still free to use it.
+        seen_spans.add(span_key)
 
         confidence = _CONFIDENCE_BY_CLAIM_TYPE[outcome.claim_type]
         claim_id: int | None = None
@@ -354,6 +423,14 @@ def _has_existing_claims(session: Session, source_id: int) -> bool:
     )
 
 
+def _existing_span_set(session: Session, source_id: int) -> set[tuple[int, int]]:
+    """Every (span_start, span_end) already persisted for this source --
+    empty on a source with nothing extracted yet. See module docstring
+    step 3g for why this exists (force=True dedupe)."""
+    rows = session.exec(select(ClaimSource).where(ClaimSource.source_id == source_id)).all()
+    return {(row.span_start, row.span_end) for row in rows}
+
+
 def _validate(candidate: ProposedClaim, source_text: str) -> _ValidatedCandidate | str:
     """Returns the validated span/enum values, or a short rejection-reason
     string identifying which check failed."""
@@ -361,7 +438,7 @@ def _validate(candidate: ProposedClaim, source_text: str) -> _ValidatedCandidate
     if not quote.strip():
         return "empty_quote"
 
-    span = locate_span(quote, source_text)
+    span = _locate_span_case_insensitive(quote, source_text)
     if span is None:
         return "quote_not_found"
     span_start, span_end = span
