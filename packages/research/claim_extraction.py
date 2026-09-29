@@ -83,19 +83,31 @@ Order, all before any persistence:
    f. Derive confidence mechanically from claim_type, rather than asking
       the model for both independently -- see docs/SCHEMA.md for why
       this pairing is fixed instead of modeled as two free axes.
-   g. Reject if the candidate's located (span_start, span_end) already
-      backs an existing ClaimSource for this source -- this is what
-      keeps force=True's "adds a second batch, never deletes or merges"
-      contract (step 1 above) from also meaning "duplicates every claim
-      that gets proposed again." force exists so a human can add
-      genuinely new claims a first pass missed, not to multiply an
-      identical Claim+ClaimSource pair each time the same passage gets
-      re-proposed. Checked against every ClaimSource already in the DB
-      for this source_id, plus every span already accepted earlier in
-      this same run -- two identical candidates in one provider response
-      are caught the same way a re-run's duplicate is. A fresh source
-      with nothing extracted yet has no existing spans, so this step
-      never rejects anything on a first pass.
+   g. Reject if the candidate's located span overlaps an existing
+      ClaimSource for this source by at least
+      DUPLICATE_SPAN_OVERLAP_THRESHOLD (90%) of the longer of the two
+      spans -- this is what keeps force=True's "adds a second batch,
+      never deletes or merges" contract (step 1 above) from also
+      meaning "duplicates every claim that gets proposed again." force
+      exists so a human can add genuinely new claims a first pass
+      missed, not to multiply near-identical Claim+ClaimSource pairs
+      each time the same passage gets re-proposed with a one-character-
+      different boundary. Exact-match was tried first and measured
+      insufficient: a real forced re-run produced 12 candidates, of
+      which only 4 shared an exact span with an existing claim, but 10
+      of the 12 turned out to restate a fact already in the DB, off by
+      one trailing period or a slightly wider/narrower quote boundary
+      (docs/HANDOFF.md). Overlap-ratio, not raw character overlap,
+      because two genuinely different facts drawn from the same long
+      sentence can share a real, small amount of text without being
+      duplicates of each other -- ratio against the longer span is what
+      lets a short subset-quote inside a long one register as highly
+      overlapping while two partially-overlapping-but-otherwise-
+      distinct quotes don't. Checked against every ClaimSource already
+      in the DB for this source_id, plus every span already accepted
+      earlier in this same run. A fresh source with nothing extracted
+      yet has no existing spans, so this step never rejects anything on
+      a first pass.
    h. Reject if packages.domain.content_safety.check_text() matches
       either the candidate's assertion or its located quoted_span --
       this is the "source content" half of that filter (the other
@@ -132,6 +144,11 @@ from packages.domain.enums import TIER_A_SOURCE_TIERS, ClaimCategory, ClaimConfi
 from packages.research.llm_provider import ClaimExtractionProvider, ProposedClaim
 
 MAX_QUOTED_SPAN_CHARS = 800
+
+# See module docstring step 3g for why this is overlap-ratio, not
+# exact-match -- measured against a real forced re-run before picking
+# 0.90, not chosen a priori.
+DUPLICATE_SPAN_OVERLAP_THRESHOLD = 0.90
 
 # Word/abbreviation forms map to a single canonical letter so "$110B"
 # and "$110 billion" compare equal -- see _figures_in's own docstring.
@@ -317,13 +334,14 @@ async def extract_claims_for_source(
             continue
 
         # Step 3g (module docstring) -- force=True must not duplicate a
-        # claim whose exact span already backs one for this source.
-        # seen_spans is seeded from the DB and grows only as this run
-        # actually accepts candidates (below, after content-safety) --
-        # checked here first so a candidate doesn't pay for a span a
-        # different, since-rejected candidate merely attempted.
+        # claim whose span sufficiently overlaps one already backing a
+        # claim for this source. seen_spans is seeded from the DB and
+        # grows only as this run actually accepts candidates (below,
+        # after content-safety) -- checked here first so a candidate
+        # doesn't pay for a span a different, since-rejected candidate
+        # merely attempted.
         span_key = (outcome.span_start, outcome.span_end)
-        if span_key in seen_spans:
+        if _is_duplicate_span(span_key, seen_spans):
             rejected.append(
                 RejectedClaim(
                     assertion=candidate.assertion,
@@ -429,6 +447,29 @@ def _existing_span_set(session: Session, source_id: int) -> set[tuple[int, int]]
     step 3g for why this exists (force=True dedupe)."""
     rows = session.exec(select(ClaimSource).where(ClaimSource.source_id == source_id)).all()
     return {(row.span_start, row.span_end) for row in rows}
+
+
+def _overlap_ratio(a: tuple[int, int], b: tuple[int, int]) -> float:
+    """Overlapping character count divided by the LONGER of the two
+    spans -- not the shorter, and not raw overlap length alone. Against
+    the longer span, a short quote fully contained inside a much longer
+    one still reads as highly overlapping (correct -- that's a
+    restatement), while two long, mostly-distinct quotes that happen to
+    share a short connecting phrase don't cross the threshold (also
+    correct -- see module docstring step 3g)."""
+    a_start, a_end = a
+    b_start, b_end = b
+    overlap = max(0, min(a_end, b_end) - max(a_start, b_start))
+    longer = max(a_end - a_start, b_end - b_start)
+    if longer == 0:
+        return 0.0
+    return overlap / longer
+
+
+def _is_duplicate_span(candidate: tuple[int, int], existing: set[tuple[int, int]]) -> bool:
+    return any(
+        _overlap_ratio(candidate, other) >= DUPLICATE_SPAN_OVERLAP_THRESHOLD for other in existing
+    )
 
 
 def _validate(candidate: ProposedClaim, source_text: str) -> _ValidatedCandidate | str:

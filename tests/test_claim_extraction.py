@@ -506,6 +506,71 @@ async def test_forced_reextraction_skips_a_candidate_matching_an_existing_span(
     assert len(session.exec(select(Claim)).all()) == 1  # no duplicate persisted
 
 
+TRAILING_PERIOD_SOURCE_TEXT = (
+    "If it doesn't close at all due to regulatory matters, Paramount will "
+    "pay WBD a $7 billion termination fee."
+)
+
+
+async def test_forced_reextraction_rejects_a_trailing_period_near_duplicate(
+    session: Session, strategy_id: int, tmp_path: Path
+) -> None:
+    """Exact-match dedupe was measured insufficient on a real forced
+    re-run (docs/HANDOFF.md): 10 of 12 candidates restated an existing
+    fact with a span off by one trailing period or a wider/narrower
+    boundary, and only 4 of those 10 happened to match exactly. This is
+    the off-by-one-trailing-period shape specifically -- overlap well
+    above the 90% threshold, must be rejected even though the spans
+    aren't byte-identical."""
+    subject_id = _persist_subject(session, strategy_id)
+    text_path = tmp_path / "trailing_period_source.txt"
+    text_path.write_text(TRAILING_PERIOD_SOURCE_TEXT, encoding="utf-8")
+    source = _make_source(session, subject_id, tmp_path, text_path=str(text_path))
+    without_period = (
+        "If it doesn't close at all due to regulatory matters, Paramount "
+        "will pay WBD a $7 billion termination fee"
+    )
+    with_period = without_period + "."
+    first_provider = _FakeProvider([_valid_candidate(quoted_span=without_period)])
+    await extract_claims_for_source(session, source, first_provider)
+
+    second_provider = _FakeProvider([_valid_candidate(quoted_span=with_period)])
+    second = await extract_claims_for_source(session, source, second_provider, force=True)
+
+    assert second.claims == []
+    assert second.rejected[0].reason == "duplicate_span"
+    assert len(session.exec(select(Claim)).all()) == 1
+
+
+TWO_FACTS_SOURCE_TEXT = "Revenue grew 10 percent while profit fell 5 percent, the company said."
+
+
+async def test_two_distinct_facts_with_partial_overlap_are_both_accepted(
+    session: Session, strategy_id: int, tmp_path: Path
+) -> None:
+    """Two genuinely different facts drawn from the same sentence can
+    share a short connecting phrase without being duplicates of each
+    other -- overlap here is far below the 90% threshold (about 11%),
+    so both must be created, not deduped."""
+    subject_id = _persist_subject(session, strategy_id)
+    text_path = tmp_path / "two_facts_source.txt"
+    text_path.write_text(TWO_FACTS_SOURCE_TEXT, encoding="utf-8")
+    source = _make_source(session, subject_id, tmp_path, text_path=str(text_path))
+    quote_a = "Revenue grew 10 percent while"
+    quote_b = "while profit fell 5 percent, the company said."
+    provider = _FakeProvider(
+        [
+            _valid_candidate(assertion="Revenue grew 10 percent.", quoted_span=quote_a),
+            _valid_candidate(assertion="Profit fell 5 percent.", quoted_span=quote_b),
+        ]
+    )
+
+    result = await extract_claims_for_source(session, source, provider)
+
+    assert len(result.claims) == 2
+    assert result.rejected == []
+
+
 async def test_zero_claims_on_tier_a_source_is_flagged(
     session: Session, strategy_id: int, tmp_path: Path
 ) -> None:
