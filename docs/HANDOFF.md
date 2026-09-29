@@ -754,6 +754,36 @@ All of these are recorded in `docs/SCHEMA.md`. **None are fixed** except where n
     today would have no reason to doubt the thesis. **Finding #48's underlying gap is not closed
     by this run.**
 
+50. **Finding #48 closed at the claim-table level: claim 145.** A second `--force` extraction
+    against source 15, after the case-insensitivity and figure-check fixes (finding #49) landed,
+    produced "The deal is in limbo as a lawsuit with 12 state attorneys general heads to trial in
+    March 2027" (`quoted_span`: "The deal, which is in limbo as a lawsuit with 12 state attorneys
+    general heads to trial in March 2027") — correct capitalization this time, and no imported
+    figure from an adjacent sentence. This is the exact fact finding #48 identified as missing.
+    **The claim table now has it; episode 1's thesis is still wrong until a human rewrites it** —
+    that instruction from finding #48 stands unchanged.
+
+    **Dedupe moved from exact-span-match to overlap-ratio, measured necessary on this same forced
+    run.** Of the 12 candidates that run produced, only 4 shared an exact `(span_start, span_end)`
+    with an existing claim; **10 of the 12 turned out to restate a fact already in the DB**, off
+    by one trailing period or a slightly wider/narrower quote boundary — exact-match dedupe caught
+    4 of these 10, missing the other 6 entirely, plus 143 and 144 sat in a genuine gray zone
+    (below the new 90% threshold, so accepted, but overlapping enough to warrant a human look).
+    `packages/research/claim_extraction.py`'s `duplicate_span` check now rejects a candidate whose
+    span overlaps an existing one by ≥90% of the longer span (`DUPLICATE_SPAN_OVERLAP_THRESHOLD`),
+    not merely an identical span. Ratio against the *longer* span, not raw overlap length, so a
+    short quote fully contained in a long one reads as a near-duplicate while two long,
+    substantially-different quotes sharing one short connecting phrase don't falsely trip it.
+
+    **Cleanup performed on the DB, this session:** claims 142, 146, 147, 148, 150, 151, 152, 153
+    (all ≥99% overlap with an existing claim, all differing only by a trailing period) were
+    confirmed to have zero `EpisodeClaim` references, then hard-deleted along with their
+    `ClaimSource` rows, keeping each older original. `PRAGMA foreign_key_check` clean afterward.
+    **Claims 143 and 144 were deliberately left alone** — their overlap with 116 and 117 falls
+    below the 90% threshold (a narrower/wider quote boundary, not a one-character difference), and
+    143's assertion is byte-identical to 116's while 144's carries genuinely additional context
+    117 doesn't — a human call, not an automatic one.
+
 ---
 
 ## 8. Entity extraction: validated
