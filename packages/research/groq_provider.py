@@ -168,6 +168,20 @@ Do not invent claims not supported by the text. If the source has no
 extractable factual content, return an empty list. Do not pad the list to
 reach any particular count.
 
+category must be EXACTLY one of these six words, spelled exactly this
+way, and no other word, ever: "event", "person", "location", "timeline",
+"evidence", "legal_outcome". claim_type must be EXACTLY one of these
+three words, and no other word, ever: "fact", "contemporaneous_report",
+"inference". Do not invent a new category or claim_type word that seems
+more descriptive of the specific claim -- a claim about a subscriber
+count, revenue figure, or profit figure is "evidence" (a specific data
+point being cited) or "event" (something that happened, e.g. a deal
+closing or a metric being disclosed), never "subscriber", "revenue",
+"profit", "financial", "metric", or any other word outside the six
+listed above. If none of the six seems like a perfect fit, choose the
+closest one from the list -- an imperfect fit from the list is correct;
+a new word outside the list is not, no matter how accurate it sounds.
+
 Respond with a single JSON object of the exact shape
 {"claims": [{"assertion": "...", "quoted_span": "...", "claim_type":
 "...", "category": "...", "date_anchor": "..." or null}, ...]} and
