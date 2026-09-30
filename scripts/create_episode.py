@@ -60,9 +60,18 @@ A real (non-dry-run) run refuses if an Episode already exists for
 posture -- creating a second real episode for a subject is a
 deliberate, separate decision this script doesn't make silently.
 
+--allow-additional overrides that one guard and only that guard: pass
+it to create a second (or further) episode for a subject that already
+has one. Every other check in this module -- backup present,
+VariationProfile/SubtitleStyle exist, a qualifying source, rule 5/6's
+thesis-bearing count, cold-open validation -- still runs exactly as
+before. Without this flag, behavior is byte-for-byte what it was
+before this flag existed.
+
 Usage:
     uv run python -m scripts.create_episode --subject-id 10 --thesis "..." --dry-run
     uv run python -m scripts.create_episode --subject-id 10 --thesis "..."
+    uv run python -m scripts.create_episode --subject-id 10 --thesis "..." --allow-additional
 """
 
 from __future__ import annotations
@@ -224,27 +233,41 @@ def _report_allocation(
     print(f"  derived_runtime_minutes: {allocated.derived_runtime_minutes}")
 
 
-def create_episode_for_subject(subject_id: int, thesis: str) -> int:
+def create_episode_for_subject(
+    subject_id: int, thesis: str, *, allow_additional: bool = False
+) -> int:
     """Importable entry point for a real (non-dry-run) episode
     creation -- scripts/run_episode.py (Task 4) calls this directly
     instead of shelling out to main(). Returns the new episode_id.
-    Raises SetupAborted on any failure (episode already exists, no
-    RESOLUTION-tagged source, VariationProfile/SubtitleStyle missing,
-    etc.) -- no retry, caller decides how to report/record that."""
-    episode_id = _run(subject_id, thesis, dry_run=False)
+    Raises SetupAborted on any failure (episode already exists and
+    allow_additional is False, no RESOLUTION-tagged source,
+    VariationProfile/SubtitleStyle missing, etc.) -- no retry, caller
+    decides how to report/record that. allow_additional defaults False,
+    same as scripts/run_episode.py's existing call site (which passes
+    neither positionally nor by keyword) -- adding this parameter does
+    not change that caller's behavior."""
+    episode_id = _run(subject_id, thesis, dry_run=False, allow_additional=allow_additional)
     assert episode_id is not None  # dry_run=False always returns a real id or raises
     return episode_id
 
 
-def _run(subject_id: int, thesis: str, dry_run: bool) -> int | None:
+def _run(
+    subject_id: int, thesis: str, dry_run: bool, allow_additional: bool = False
+) -> int | None:
     with get_session() as session:
         if not dry_run:
             _require_backup()
             existing = session.exec(select(Episode).where(Episode.subject_id == subject_id)).first()
             if existing is not None:
-                raise SetupAborted(
-                    f"refusing to run: subject {subject_id} already has episode "
-                    f"id={existing.id} -- not creating a second one without --dry-run"
+                if not allow_additional:
+                    raise SetupAborted(
+                        f"refusing to run: subject {subject_id} already has episode "
+                        f"id={existing.id} -- not creating a second one without "
+                        f"--allow-additional"
+                    )
+                print(
+                    f"subject {subject_id} already has episode id={existing.id} -- "
+                    f"creating an additional one (--allow-additional)"
                 )
             _require_row_exists(session, VariationProfile, VARIATION_PROFILE_ID, "VariationProfile")
             _require_row_exists(session, SubtitleStyle, SUBTITLE_STYLE_ID, "SubtitleStyle")
@@ -298,13 +321,19 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--subject-id", type=int, required=True)
     parser.add_argument("--thesis", type=str, required=True)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--allow-additional",
+        action="store_true",
+        help="Allow creating a second (or further) episode for a subject "
+        "that already has one. Without this flag, that guard is unchanged.",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
     try:
-        _run(args.subject_id, args.thesis, args.dry_run)
+        _run(args.subject_id, args.thesis, args.dry_run, allow_additional=args.allow_additional)
     except SetupAborted as exc:
         print(f"ABORTED: {exc}", file=sys.stderr)
         return 1
